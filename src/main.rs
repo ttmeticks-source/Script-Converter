@@ -2,6 +2,7 @@ mod fast_render;
 mod systems;
 mod world_stream;
 
+use macroquad::audio::{load_sound_from_bytes, play_sound_once};
 use macroquad::prelude::*;
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
@@ -220,12 +221,19 @@ fn save_world(
     name: &str,
     seed: u64,
     style: u8,
+    game_mode: systems::GameMode,
     blocks: &[Block],
 ) -> Result<(), String> {
     fs::create_dir_all(data_directory())
         .map_err(|_| "Could not create the world save folder.".to_owned())?;
 
-    let mut contents = format!("{}\n{}\n{}\n", name.replace('\n', " "), seed, style);
+    let mut contents = format!(
+        "{}\n{}\n{}\n{}\n",
+        name.replace('\n', " "),
+        seed,
+        style,
+        game_mode.label()
+    );
     for block in blocks {
         contents.push_str(&format!(
             "{},{},{},{},{}\n",
@@ -236,15 +244,25 @@ fn save_world(
         .map_err(|_| "Could not write the world save file.".to_owned())
 }
 
-fn load_world() -> Option<(String, u64, u8, Vec<Block>)> {
+fn load_world() -> Option<(String, u64, u8, systems::GameMode, Vec<Block>)> {
     let contents = fs::read_to_string(world_path()).ok()?;
     let mut lines = contents.lines();
     let name = lines.next()?.to_owned();
     let seed = lines.next()?.parse::<u64>().ok()?;
     let style = lines.next()?.parse::<u8>().ok()?.min(2);
+    let remaining: Vec<&str> = lines.collect();
+
+    // Older saves had no game-mode row, so keep them loadable as Survival.
+    let (game_mode, block_lines) = match remaining.first() {
+        Some(value) => match systems::GameMode::parse(value) {
+            Some(mode) => (mode, &remaining[1..]),
+            None => (systems::GameMode::Survival, &remaining[..]),
+        },
+        None => (systems::GameMode::Survival, &remaining[..]),
+    };
     let mut blocks = Vec::new();
 
-    for line in lines {
+    for line in block_lines {
         let mut values = line.split(',');
         let x = values.next()?.parse::<i32>().ok()?;
         let y = values.next()?.parse::<i32>().ok()?;
@@ -255,7 +273,7 @@ fn load_world() -> Option<(String, u64, u8, Vec<Block>)> {
             blocks.push(Block { x, y, z, kind, placed });
         }
     }
-    Some((name, seed, style, blocks))
+    Some((name, seed, style, game_mode, blocks))
 }
 
 fn panel(x: f32, y: f32, w: f32, h: f32) {
@@ -648,6 +666,78 @@ fn spawn_position(seed: u64, style: u8) -> Vec3 {
     vec3(0.0, ground + 7.0, 15.0)
 }
 
+fn block_cell(point: Vec3) -> (i32, i32, i32) {
+    (
+        (point.x + 0.5).floor() as i32,
+        (point.y + 0.5).floor() as i32,
+        (point.z + 0.5).floor() as i32,
+    )
+}
+
+/// Marches a short ray through the voxel grid and returns the first occupied
+/// cell plus the last empty cell before it (the normal Minecraft place target).
+fn raycast_block(
+    origin: Vec3,
+    direction: Vec3,
+    occupied: &HashSet<(i32, i32, i32)>,
+    max_distance: f32,
+) -> Option<((i32, i32, i32), (i32, i32, i32))> {
+    let direction = direction.normalize_or_zero();
+    if direction.length_squared() < 0.5 {
+        return None;
+    }
+
+    let mut previous = block_cell(origin);
+    let steps = (max_distance / 0.05).ceil() as usize;
+    for step in 1..=steps {
+        let point = origin + direction * (step as f32 * 0.05);
+        let cell = block_cell(point);
+        if cell != previous {
+            if occupied.contains(&cell) {
+                return Some((cell, previous));
+            }
+            previous = cell;
+        }
+    }
+    None
+}
+
+/// Makes short original PCM effects so sounds are bundled in the executable
+/// and do not depend on the app's current working directory.
+fn make_effect_wav(frequency: f32, duration: f32, grit: f32, sweep: f32) -> Vec<u8> {
+    const SAMPLE_RATE: u32 = 22_050;
+    let sample_count = (duration * SAMPLE_RATE as f32).max(1.0) as usize;
+    let data_size = (sample_count * 2) as u32;
+    let mut wav = Vec::with_capacity(44 + data_size as usize);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36_u32 + data_size).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16_u32.to_le_bytes());
+    wav.extend_from_slice(&1_u16.to_le_bytes());
+    wav.extend_from_slice(&1_u16.to_le_bytes());
+    wav.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+    wav.extend_from_slice(&(SAMPLE_RATE * 2).to_le_bytes());
+    wav.extend_from_slice(&2_u16.to_le_bytes());
+    wav.extend_from_slice(&16_u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_size.to_le_bytes());
+
+    let mut noise_state = 0x51f2_a39du32;
+    for index in 0..sample_count {
+        let t = index as f32 / SAMPLE_RATE as f32;
+        let progress = index as f32 / sample_count as f32;
+        let envelope = (1.0 - progress).max(0.0).powf(2.1);
+        let phase = std::f32::consts::TAU * frequency * t * (1.0 + sweep * progress);
+        noise_state = noise_state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let noise = ((noise_state >> 16) as i16) as f32 / i16::MAX as f32;
+        let tone = phase.sin() * (1.0 - grit) + noise * grit;
+        let sample = (tone * envelope * 0.24 * i16::MAX as f32)
+            .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+        wav.extend_from_slice(&sample.to_le_bytes());
+    }
+    wav
+}
+
 type WorldBuildResult = (
     Vec<Block>,
     HashSet<(i32, i32, i32)>,
@@ -725,6 +815,7 @@ async fn main() {
     let mut world_seed = random_seed();
     let mut seed_input = world_seed.to_string();
     let mut world_style = 0_u8;
+    let mut game_mode = systems::GameMode::Survival;
     let mut world_name_field = 0_u8;
     let mut world_status = String::new();
     let mut blocks = Vec::new();
@@ -737,11 +828,12 @@ async fn main() {
     let mut loading_status = "Preparing world...".to_owned();
     let mut has_world = false;
 
-    if let Some((saved_name, saved_seed, saved_style, saved_blocks)) = load_world() {
+    if let Some((saved_name, saved_seed, saved_style, saved_mode, saved_blocks)) = load_world() {
         world_name = saved_name;
         world_seed = saved_seed;
         seed_input = world_seed.to_string();
         world_style = saved_style;
+        game_mode = saved_mode;
         for block in saved_blocks {
             occupied.insert((block.x, block.y, block.z));
             requested_chunks.insert((
@@ -756,12 +848,16 @@ async fn main() {
     let textures: [Texture2D; 8] =
         std::array::from_fn(|index| material_texture(index as u8));
 
+    // Audio is optional at runtime: unsupported devices simply leave effects off.
+    let place_sound = load_sound_from_bytes(&make_effect_wav(620.0, 0.075, 0.10, -0.18)).await.ok();
+    let break_sound = load_sound_from_bytes(&make_effect_wav(145.0, 0.13, 0.34, -0.62)).await.ok();
+    let ui_sound = load_sound_from_bytes(&make_effect_wav(880.0, 0.055, 0.02, 0.08)).await.ok();
+
     let mut camera_position = spawn_position(world_seed, world_style);
     let mut yaw = 0.0_f32;
     let mut pitch = -0.34_f32;
     let mut selected_block = 0_u8;
     let mut world_message = "Welcome to your world.".to_owned();
-    let mut game_mode = systems::GameMode::Survival;
     let mut health = 20_u8;
     let mut chat_open = false;
     let mut chat_input = String::new();
