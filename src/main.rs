@@ -862,6 +862,8 @@ async fn main() {
     let mut chat_open = false;
     let mut chat_input = String::new();
     let mut debug_overlay = false;
+    // Conservative default for older Intel Macs; F4 cycles 48m / 64m / 80m.
+    let mut render_distance = 48.0_f32;
 
     loop {
         let dt = get_frame_time().min(0.05);
@@ -1408,6 +1410,15 @@ async fn main() {
                 if is_key_pressed(KeyCode::F3) {
                     debug_overlay = !debug_overlay;
                 }
+                if !chat_open && is_key_pressed(KeyCode::F4) {
+                    render_distance = if render_distance < 56.0 {
+                        64.0
+                    } else if render_distance < 72.0 {
+                        80.0
+                    } else {
+                        48.0
+                    };
+                }
 
                 let mut chat_closed_this_frame = false;
                 if !chat_open && (is_key_pressed(KeyCode::Minus) || is_key_pressed(KeyCode::Enter)) {
@@ -1559,7 +1570,7 @@ async fn main() {
                 set_camera(&camera);
 
                 let (visible_chunks, draw_calls) =
-                    fast_render::draw_visible_chunks(&fast_chunks, camera_position, look, 78.0);
+                    fast_render::draw_visible_chunks(&fast_chunks, camera_position, look, render_distance);
 
                 if !chat_open && is_key_pressed(KeyCode::Key1) { selected_block = 0; }
                 if !chat_open && is_key_pressed(KeyCode::Key2) { selected_block = 1; }
@@ -1685,7 +1696,12 @@ async fn main() {
                     Color::new(0.77, 0.84, 1.0, 1.0),
                 );
                 label(
-                    &format!("{} blocks  |  {}  |  LEFT break  |  RIGHT place", blocks.len(), game_mode.label()),
+                    &format!(
+                        "{} blocks  |  {}  |  LEFT break  |  RIGHT place  |  F4 {}m",
+                        blocks.len(),
+                        game_mode.label(),
+                        render_distance as u32
+                    ),
                     30.0,
                     96.0,
                     11.0,
@@ -1754,14 +1770,6 @@ async fn main() {
                     12.0,
                     Color::new(0.88, 0.91, 1.0, 1.0),
                 );
-                label(
-                    "1-8 hotbar  |  - chat  |  F3 stats  |  ESC save",
-                    screen_w - 318.0,
-                    screen_h - 28.0,
-                    12.0,
-                    Color::new(0.95, 0.97, 1.0, 1.0),
-                );
-
                 // Performance HUD: always visible; F3 shows extra renderer counters.
                 let fps = get_fps();
                 let frame_ms = get_frame_time() * 1000.0;
