@@ -18,6 +18,11 @@ RealismCraft is a standalone block-building game project written in Rust and Mac
 - **Random terrain:** seeded Natural, Highlands, and Islands terrain presets, with layered ground, beaches, water, snowy areas, and scattered trees.
 - **World saves:** the current world and placed/removed blocks are saved locally.
 - **Material textures:** procedural 128×128 surface textures for grass, dirt, stone, sand, wood, leaves, water, and snow. These are generated materials inspired by real surfaces, not photo-scanned decal packs.
+- **Chunk renderer:** 16×16 chunk meshes batch visible block faces by material; buried faces are omitted.
+- **Parallel loading:** terrain and CPU mesh construction run on worker threads with Rayon while a loading screen stays responsive.
+- **Performance HUD:** FPS and frame-time display, with F3 counters for visible chunks and mesh draw calls.
+- **First-person camera:** mouse-look with cursor capture, WASD movement, and vertical controls.
+- **Chat commands:** `!set GameMode creative`, `survival`, `adventure`, or `spectator`.
 - **Creative building:** place and remove blocks with a quick-select hotbar.
 - **Galaxy-style menus:** a custom first-run and main menu interface.
 
@@ -46,7 +51,9 @@ cargo run --release
 ## Controls
 
 - **WASD** — move
-- **Arrow keys** — look around
+- **Mouse** — look around (cursor is captured in-world)
+- **Enter** — open chat; type `!set GameMode creative` to switch modes
+- **F3** — show/hide renderer counters
 - **Space / Left Ctrl** — move up / down
 - **Left Shift** — move faster
 - **Left click** — place selected block
@@ -66,13 +73,14 @@ The local profile is not connected to an authentication server and cannot be use
 
 ## Planned next milestones
 
-- First-person mouse look and improved player movement.
+- Real multiplayer sessions with an explicit protocol/server bridge; current remote avatars are only a visual simulation.
+- Further performance work: chunk streaming, frustum culling, mesh reuse, and GPU-side rendering.
 - Higher-detail material maps, lighting, shadows, and ambient effects.
 - World selection and multiple save slots.
 - More biomes, caves, ores, and structures.
 - Skin editor and user-created skins.
-- Multiplayer and user-hosted servers.
-- A sandboxed WebAssembly mod API. Mods will not receive unrestricted access to the user's computer.
+- A sandboxed WebAssembly mod runtime. Mods will not receive unrestricted access to the user's computer.
+- Optional Pumpkin server adapter; Pumpkin is a separate GPLv3 server, not a renderer dependency. See [Pumpkin integration notes](docs/PUMPKIN_BACKEND.md).
 
 ## License
 
