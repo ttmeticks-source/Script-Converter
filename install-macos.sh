@@ -20,7 +20,7 @@ if ! xcode-select -p >/dev/null 2>&1; then
   exit 1
 fi
 
-for tool in curl tar swift sips iconutil ditto; do
+for tool in curl tar sips iconutil ditto; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "Required macOS tool not found: $tool"
     exit 1
@@ -52,105 +52,18 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 cp "$BIN" "$APP_BUNDLE/Contents/MacOS/RealismCraft"
 chmod 755 "$APP_BUNDLE/Contents/MacOS/RealismCraft"
 
-cat > "$TMP_DIR/make-icon.swift" <<'SWIFT'
-import AppKit
-import Foundation
+ICON_SOURCE="$TMP_DIR/source/assets/realismcraft-icon.png"
+if [[ ! -f "$ICON_SOURCE" ]]; then
+  echo "The bundled RealismCraft icon artwork is missing: $ICON_SOURCE"
+  exit 1
+fi
 
-func polygon(_ points: [(CGFloat, CGFloat)], color: NSColor) {
-    let path = NSBezierPath()
-    guard let first = points.first else { return }
-    path.move(to: NSPoint(x: first.0, y: first.1))
-    for point in points.dropFirst() {
-        path.line(to: NSPoint(x: point.0, y: point.1))
-    }
-    path.close()
-    color.setFill()
-    path.fill()
-}
-
-let bitmap = NSBitmapImageRep(
-    bitmapDataPlanes: nil,
-    pixelsWide: 1024,
-    pixelsHigh: 1024,
-    bitsPerSample: 8,
-    samplesPerPixel: 4,
-    hasAlpha: true,
-    isPlanar: false,
-    colorSpaceName: .deviceRGB,
-    bytesPerRow: 0,
-    bitsPerPixel: 0
-)!
-let graphics = NSGraphicsContext(bitmapImageRep: bitmap)!
-NSGraphicsContext.saveGraphicsState()
-NSGraphicsContext.current = graphics
-graphics.imageInterpolation = .high
-graphics.cgContext.setShouldAntialias(true)
-
-let background = NSBezierPath(roundedRect: NSRect(x: 30, y: 30, width: 964, height: 964), xRadius: 218, yRadius: 218)
-NSGradient(colors: [
-    NSColor(calibratedRed: 0.025, green: 0.075, blue: 0.23, alpha: 1),
-    NSColor(calibratedRed: 0.07, green: 0.24, blue: 0.39, alpha: 1),
-    NSColor(calibratedRed: 0.10, green: 0.36, blue: 0.36, alpha: 1)
-])!.draw(in: background, angle: 90)
-
-let glow = NSBezierPath(ovalIn: NSRect(x: 650, y: 635, width: 190, height: 190))
-NSGradient(colors: [
-    NSColor(calibratedRed: 1.0, green: 0.88, blue: 0.52, alpha: 0.95),
-    NSColor(calibratedRed: 0.94, green: 0.48, blue: 0.25, alpha: 0.08)
-])!.draw(in: glow, angle: 45)
-
-let stars: [(CGFloat, CGFloat, CGFloat)] = [(170, 820, 5), (315, 875, 3), (820, 870, 4), (880, 720, 3)]
-for (x, y, radius) in stars {
-    NSColor(calibratedWhite: 1.0, alpha: 0.72).setFill()
-    NSBezierPath(ovalIn: NSRect(x: x, y: y, width: radius * 2, height: radius * 2)).fill()
-}
-
-// Isometric grass-and-soil block: a distinctive, original game icon.
-polygon([(248, 590), (512, 736), (776, 590), (512, 444)],
-        color: NSColor(calibratedRed: 0.30, green: 0.72, blue: 0.28, alpha: 1))
-polygon([(248, 590), (512, 444), (512, 176), (248, 322)],
-        color: NSColor(calibratedRed: 0.45, green: 0.29, blue: 0.17, alpha: 1))
-polygon([(512, 444), (776, 590), (776, 322), (512, 176)],
-        color: NSColor(calibratedRed: 0.31, green: 0.19, blue: 0.13, alpha: 1))
-
-// Grass seams and soil strata add detail while staying crisp at small sizes.
-polygon([(248, 590), (512, 736), (512, 700), (248, 554)],
-        color: NSColor(calibratedRed: 0.17, green: 0.53, blue: 0.20, alpha: 1))
-polygon([(512, 736), (776, 590), (776, 554), (512, 700)],
-        color: NSColor(calibratedRed: 0.12, green: 0.43, blue: 0.19, alpha: 1))
-polygon([(274, 500), (512, 368), (512, 350), (274, 482)],
-        color: NSColor(calibratedRed: 0.57, green: 0.39, blue: 0.23, alpha: 0.65))
-polygon([(536, 430), (750, 548), (750, 531), (536, 412)],
-        color: NSColor(calibratedRed: 0.48, green: 0.29, blue: 0.17, alpha: 0.75))
-
-let edge = NSBezierPath()
-edge.lineWidth = 9
-edge.lineJoinStyle = .round
-edge.move(to: NSPoint(x: 248, y: 590))
-edge.line(to: NSPoint(x: 512, y: 736))
-edge.line(to: NSPoint(x: 776, y: 590))
-NSColor(calibratedRed: 0.70, green: 0.93, blue: 0.58, alpha: 0.9).setStroke()
-edge.stroke()
-
-let border = NSBezierPath(roundedRect: NSRect(x: 30, y: 30, width: 964, height: 964), xRadius: 218, yRadius: 218)
-border.lineWidth = 5
-NSColor(calibratedWhite: 1.0, alpha: 0.13).setStroke()
-border.stroke()
-
-NSGraphicsContext.restoreGraphicsState()
-guard let png = bitmap.representation(using: .png, properties: [:]) else {
-    fatalError("Could not encode the RealismCraft icon.")
-}
-try png.write(to: URL(fileURLWithPath: CommandLine.arguments[1]))
-SWIFT
-
-swift "$TMP_DIR/make-icon.swift" "$TMP_DIR/RealismCraft.png"
 ICONSET="$APP_BUNDLE/Contents/Resources/RealismCraft.iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 128 256 512; do
   double_size=$((size * 2))
-  sips -z "$size" "$size" "$TMP_DIR/RealismCraft.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-  sips -z "$double_size" "$double_size" "$TMP_DIR/RealismCraft.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -z "$double_size" "$double_size" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP_BUNDLE/Contents/Resources/RealismCraft.icns"
 
