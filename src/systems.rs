@@ -102,7 +102,7 @@ pub fn draw_hearts(health: u8, max_health: u8) {
     let health = health.min(max_health);
     let hearts = (max_health as usize + 1) / 2;
     let start_x = 22.0;
-    let y = screen_height() - 143.0;
+    let y = screen_height() - 190.0;
 
     draw_rectangle(
         14.0,
