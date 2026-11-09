@@ -56,13 +56,13 @@ cargo run --release
 
 - **WASD** — move
 - **Mouse** — look around (cursor is captured in-world)
-- **- (minus key)** — open chat; type `!set GameMode creative` to switch modes
+- **- (minus key)** — open chat; use `/gamemode creative` or type `/help` for commands
 - **Enter** — send the chat command
 - **F3** — show/hide renderer counters
 - **Space / Left Ctrl** — move up / down
 - **Left Shift** — move faster
-- **Left click** — place selected block
-- **Right click** — remove a nearby block
+- **Left click** — break the targeted block
+- **Right click** — place the selected block
 - **1–8** — select a material
 - **Escape** — save and return to the menu
 
