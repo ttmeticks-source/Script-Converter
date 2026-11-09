@@ -16,10 +16,10 @@ pub enum GameMode {
 impl GameMode {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "survival" => Some(Self::Survival),
-            "creative" => Some(Self::Creative),
-            "adventure" => Some(Self::Adventure),
-            "spectator" => Some(Self::Spectator),
+            "survival" | "0" => Some(Self::Survival),
+            "creative" | "1" => Some(Self::Creative),
+            "adventure" | "2" => Some(Self::Adventure),
+            "spectator" | "3" => Some(Self::Spectator),
             _ => None,
         }
     }
@@ -34,16 +34,30 @@ impl GameMode {
     }
 }
 
-/// Parses the requested chat syntax: !set GameMode creative
+/// Parses Minecraft-style /gamemode commands and the earlier !set alias.
 pub fn parse_chat_command(message: &str) -> Result<Option<GameMode>, &'static str> {
     let parts: Vec<&str> = message.split_whitespace().collect();
-    if parts.first().copied() != Some("!set") {
+    if parts.is_empty() {
         return Ok(None);
     }
-    if parts.len() != 3 || !parts[1].eq_ignore_ascii_case("GameMode") {
-        return Err("Use: !set GameMode survival|creative|adventure|spectator");
-    }
-    GameMode::parse(parts[2])
+
+    let value = if parts[0].eq_ignore_ascii_case("!set") {
+        if parts.len() != 3 || !parts[1].eq_ignore_ascii_case("GameMode") {
+            return Err("Use: /gamemode survival|creative|adventure|spectator");
+        }
+        parts[2]
+    } else if parts[0].eq_ignore_ascii_case("/gamemode")
+        || parts[0].eq_ignore_ascii_case("gamemode")
+    {
+        if parts.len() != 2 {
+            return Err("Use: /gamemode survival|creative|adventure|spectator");
+        }
+        parts[1]
+    } else {
+        return Ok(None);
+    };
+
+    GameMode::parse(value)
         .map(Some)
         .ok_or("Unknown mode. Choose survival, creative, adventure or spectator.")
 }
@@ -82,36 +96,57 @@ impl RemoteAvatar {
     }
 }
 
-/// Draws a compact heart HUD. Health is clamped to [0, max_health].
+/// Draws ten evenly spaced, non-overlapping hearts above the status bar.
 pub fn draw_hearts(health: u8, max_health: u8) {
     let max_health = max_health.max(1).min(40);
     let health = health.min(max_health);
     let hearts = (max_health as usize + 1) / 2;
-    let start_x = 20.0;
-    let y = screen_height() - 104.0;
+    let start_x = 22.0;
+    let y = screen_height() - 143.0;
+
+    draw_rectangle(
+        14.0,
+        y - 8.0,
+        hearts as f32 * 29.0 + 18.0,
+        36.0,
+        Color::new(0.012, 0.020, 0.055, 0.88),
+    );
+    draw_rectangle_lines(
+        14.0,
+        y - 8.0,
+        hearts as f32 * 29.0 + 18.0,
+        36.0,
+        1.0,
+        Color::new(0.20, 0.30, 0.56, 0.78),
+    );
+
     for index in 0..hearts {
-        let points = [
-            vec2(0.0, 4.0), vec2(4.0, 0.0), vec2(9.0, 0.0),
-            vec2(13.0, 5.0), vec2(18.0, 0.0), vec2(23.0, 0.0),
-            vec2(27.0, 5.0), vec2(25.0, 12.0), vec2(13.5, 22.0),
-            vec2(2.0, 12.0),
-        ];
-        let x = start_x + index as f32 * 31.0;
+        let x = start_x + index as f32 * 29.0;
         let filled_units = health.saturating_sub((index * 2) as u8);
-        let color = if filled_units >= 2 {
-            Color::new(0.92, 0.12, 0.22, 1.0)
-        } else if filled_units == 1 {
-            Color::new(0.92, 0.12, 0.22, 0.55)
+        let base = Color::new(0.20, 0.23, 0.33, 1.0);
+        let fill = if filled_units >= 2 {
+            Color::new(0.94, 0.16, 0.27, 1.0)
         } else {
-            Color::new(0.20, 0.22, 0.30, 0.95)
+            Color::new(0.94, 0.16, 0.27, if filled_units == 1 { 0.52 } else { 0.0 })
         };
-        for triangle in 1..points.len() - 1 {
+
+        // A heart made from two lobes and a lower point avoids the old
+        // concave-polygon fan triangulation that produced broken shapes.
+        for color in [base, fill] {
+            if color.a <= 0.0 {
+                continue;
+            }
             draw_triangle(
-                vec2(x + points[0].x, y + points[0].y),
-                vec2(x + points[triangle].x, y + points[triangle].y),
-                vec2(x + points[triangle + 1].x, y + points[triangle + 1].y),
+                vec2(x + 1.0, y + 8.0),
+                vec2(x + 25.0, y + 8.0),
+                vec2(x + 13.0, y + 25.0),
                 color,
             );
+            draw_circle(x + 7.0, y + 8.0, 6.8, color);
+            draw_circle(x + 19.0, y + 8.0, 6.8, color);
+            if color == base && filled_units > 0 {
+                // Keep the empty heart visible underneath a half/full fill.
+            }
         }
     }
 }
