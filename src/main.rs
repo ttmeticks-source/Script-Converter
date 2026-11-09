@@ -1654,15 +1654,23 @@ async fn main() {
                 draw_rectangle(
                     16.0,
                     16.0,
-                    420.0,
+                    550.0,
                     104.0,
-                    Color::new(0.018, 0.028, 0.065, 0.84),
+                    Color::new(0.012, 0.020, 0.052, 0.90),
+                );
+                draw_rectangle_lines(
+                    16.0,
+                    16.0,
+                    550.0,
+                    104.0,
+                    1.0,
+                    Color::new(0.24, 0.38, 0.72, 0.82),
                 );
                 label(
                     &format!("{}  /  {}", player_name, world_name),
                     30.0,
                     43.0,
-                    18.0,
+                    17.0,
                     WHITE,
                 );
                 label(
@@ -1677,10 +1685,10 @@ async fn main() {
                     Color::new(0.77, 0.84, 1.0, 1.0),
                 );
                 label(
-                    &format!("{} blocks   |   {} mode   |   mouse look", blocks.len(), game_mode.label()),
+                    &format!("{} blocks  |  {}  |  LEFT break  |  RIGHT place", blocks.len(), game_mode.label()),
                     30.0,
                     96.0,
-                    13.0,
+                    11.0,
                     Color::new(0.77, 0.84, 1.0, 1.0),
                 );
 
@@ -1747,8 +1755,8 @@ async fn main() {
                     Color::new(0.88, 0.91, 1.0, 1.0),
                 );
                 label(
-                    "LEFT CLICK break  |  RIGHT CLICK place  |  1-8 hotbar  |  - chat  |  ESC save",
-                    screen_w - 520.0,
+                    "1-8 hotbar  |  - chat  |  F3 stats  |  ESC save",
+                    screen_w - 318.0,
                     screen_h - 28.0,
                     12.0,
                     Color::new(0.95, 0.97, 1.0, 1.0),
