@@ -431,7 +431,7 @@ fn generate_world(
                     push_block(&mut blocks, &mut occupied, x, y, z, 4);
                 }
                 for dy in 2..=4 {
-                    let radius = if dy == 4 { 1 } else { 2 };
+                    let radius: i32 = if dy == 4 { 1 } else { 2 };
                     for dx in -radius..=radius {
                         for dz in -radius..=radius {
                             if dx.abs() + dz.abs() <= radius + 1 {
