@@ -131,6 +131,127 @@ pub fn build_chunk_data(
     chunks
 }
 
+
+fn append_world_quad(
+    mesh: &mut MaterialMeshData,
+    corners: [(f32, f32, f32); 4],
+    uvs: [(f32, f32); 4],
+    shade: f32,
+) {
+    if mesh.vertices.len() > u16::MAX as usize - 4 {
+        return;
+    }
+    let base = mesh.vertices.len() as u16;
+    let tint = Color::new(shade, shade, shade, 1.0);
+    for index in 0..4 {
+        let p = corners[index];
+        mesh.vertices.push(Vertex::new(
+            p.0, p.1, p.2,
+            uvs[index].0, uvs[index].1,
+            tint,
+        ));
+    }
+    mesh.indices.extend_from_slice(&[
+        base, base + 1, base + 2, base, base + 2, base + 3,
+    ]);
+}
+
+fn material_for(chunk: &mut ChunkMeshData, kind: u8) -> &mut MaterialMeshData {
+    let index = chunk.materials.iter().position(|material| material.kind == kind);
+    if let Some(index) = index {
+        return &mut chunk.materials[index];
+    }
+    chunk.materials.push(MaterialMeshData {
+        kind,
+        vertices: Vec::new(),
+        indices: Vec::new(),
+    });
+    chunk.materials.last_mut().expect("material was just inserted")
+}
+
+/// Adds a continuous height-field surface for natural terrain. The underlying
+/// terrain blocks remain in the world data for edits and saves, but only
+/// constructed blocks, trees and water are rendered as block models.
+fn add_smooth_ground_surface(chunk: &mut ChunkMeshData, seed: u64, style: u8) {
+    let start_x = chunk.chunk_x * CHUNK_SIZE;
+    let start_z = chunk.chunk_z * CHUNK_SIZE;
+
+    for local_x in 0..CHUNK_SIZE {
+        for local_z in 0..CHUNK_SIZE {
+            let x = start_x + local_x;
+            let z = start_z + local_z;
+            let h00 = crate::terrain_height_smooth(seed, style, x, z) + 0.035;
+            let h01 = crate::terrain_height_smooth(seed, style, x, z + 1) + 0.035;
+            let h11 = crate::terrain_height_smooth(seed, style, x + 1, z + 1) + 0.035;
+            let h10 = crate::terrain_height_smooth(seed, style, x + 1, z) + 0.035;
+
+            let discrete_height = crate::terrain_height(seed, style, x, z);
+            let temperature = crate::value_noise(
+                seed ^ 0x13a5ba1d4e7c902f,
+                x as f32 * 0.035,
+                z as f32 * 0.035,
+            );
+            let kind = if discrete_height >= 15 || (temperature < 0.17 && discrete_height > 9) {
+                7
+            } else if discrete_height <= crate::SEA_LEVEL + 1 {
+                3
+            } else {
+                0
+            };
+
+            let slope = ((h10 - h00).abs() + (h01 - h00).abs()
+                + (h11 - h10).abs() + (h11 - h01).abs()) * 0.035;
+            let shade = (0.97 - slope).clamp(0.72, 1.0);
+            let corners = [
+                (x as f32, h00, z as f32),
+                (x as f32, h01, (z + 1) as f32),
+                ((x + 1) as f32, h11, (z + 1) as f32),
+                ((x + 1) as f32, h10, z as f32),
+            ];
+            let u0 = local_x as f32 * 0.25;
+            let v0 = local_z as f32 * 0.25;
+            let u1 = (local_x + 1) as f32 * 0.25;
+            let v1 = (local_z + 1) as f32 * 0.25;
+            let uvs = [(u0, v0), (u0, v1), (u1, v1), (u1, v0)];
+            append_world_quad(material_for(chunk, kind), corners, uvs, shade);
+        }
+    }
+}
+
+/// Smooth natural terrain plus block models for constructed blocks, trees and
+/// water. This preserves the voxel editing model while removing the stepped
+/// cube silhouette from the landscape surface.
+pub fn build_chunk_data_smooth(
+    blocks: &[Block],
+    occupied: &HashSet<(i32, i32, i32)>,
+    seed: u64,
+    style: u8,
+) -> Vec<ChunkMeshData> {
+    let mut grouped: HashMap<(i32, i32), Vec<Block>> = HashMap::new();
+    for block in blocks {
+        grouped
+            .entry((block.x.div_euclid(CHUNK_SIZE), block.z.div_euclid(CHUNK_SIZE)))
+            .or_default()
+            .push(*block);
+    }
+
+    let mut chunks: Vec<ChunkMeshData> = grouped
+        .into_par_iter()
+        .map(|((chunk_x, chunk_z), chunk_blocks)| {
+            let visible_blocks = chunk_blocks
+                .into_iter()
+                .filter(|block| block.placed || block.kind >= 4)
+                .collect();
+            let mut chunk = build_one_chunk(chunk_x, chunk_z, visible_blocks, occupied);
+            add_smooth_ground_surface(&mut chunk, seed, style);
+            chunk
+        })
+        .collect();
+
+    chunks.sort_by_key(|chunk| (chunk.chunk_x, chunk.chunk_z));
+    chunks
+}
+
 /// Attach textures on the render thread after worker meshing is complete.
 pub fn upload_chunk_data(
     data: Vec<ChunkMeshData>,
