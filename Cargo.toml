@@ -6,7 +6,7 @@ description = "An original cross-platform voxel sandbox prototype"
 license = "MIT"
 
 [dependencies]
-macroquad = "0.4.14"
+macroquad = { version = "0.4.14", features = ["audio"] }
 miniquad = "0.4.11"
 getrandom = "0.2.17"
 pbkdf2 = "0.12.2"
