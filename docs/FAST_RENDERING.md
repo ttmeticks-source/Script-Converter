@@ -50,3 +50,16 @@ of renderer quality.
 This is a first optimization pass, not a promise of Horizon-equivalent
 performance. Large worlds will need chunk streaming, frustum culling, mesh
 reuse, save I/O workers, and a more advanced GPU backend.
+
+## Optional local CPU tuning
+
+For a binary used only on the Mac that built it, you can let LLVM target that
+machine's CPU features:
+
+```sh
+RUSTFLAGS="-C target-cpu=native" cargo build --release
+```
+
+Do not use this flag for a general download or cross-platform release: the
+result may use CPU instructions that another computer does not support. The
+GitHub release workflow intentionally builds portable target binaries.
