@@ -1,9 +1,13 @@
+mod fast_render;
+mod systems;
+
 use macroquad::prelude::*;
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 const PASSWORD_ROUNDS: u32 = 120_000;
 const SEA_LEVEL: i32 = 4;
@@ -15,15 +19,16 @@ enum Screen {
     Login,
     Menu,
     WorldSetup,
+    Loading,
     World,
 }
 
 #[derive(Clone, Copy)]
-struct Block {
-    x: i32,
-    y: i32,
-    z: i32,
-    kind: u8,
+pub(crate) struct Block {
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) z: i32,
+    pub(crate) kind: u8,
 }
 
 struct LocalAccount {
@@ -37,9 +42,9 @@ fn window_conf() -> Conf {
         window_title: "RealismCraft".to_owned(),
         window_width: 1280,
         window_height: 800,
-        high_dpi: true,
+        high_dpi: false,
         fullscreen: false,
-        sample_count: 4,
+        sample_count: 1,
         window_resizable: true,
         ..Default::default()
     }
@@ -595,6 +600,34 @@ fn spawn_position(seed: u64, style: u8) -> Vec3 {
     vec3(0.0, ground + 7.0, 15.0)
 }
 
+type WorldBuildResult = (
+    Vec<Block>,
+    HashSet<(i32, i32, i32)>,
+    Vec<fast_render::ChunkMeshData>,
+);
+
+fn spawn_mesh_build(
+    blocks: Vec<Block>,
+    occupied: HashSet<(i32, i32, i32)>,
+) -> Receiver<WorldBuildResult> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let meshes = fast_render::build_chunk_data(&blocks, &occupied);
+        let _ = sender.send((blocks, occupied, meshes));
+    });
+    receiver
+}
+
+fn spawn_generated_world_build(seed: u64, style: u8) -> Receiver<WorldBuildResult> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let (blocks, occupied) = generate_world(seed, style);
+        let meshes = fast_render::build_chunk_data(&blocks, &occupied);
+        let _ = sender.send((blocks, occupied, meshes));
+    });
+    receiver
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut account = load_account();
@@ -621,6 +654,9 @@ async fn main() {
     let mut world_status = String::new();
     let mut blocks = Vec::new();
     let mut occupied = HashSet::new();
+    let mut fast_chunks: Vec<fast_render::FastChunk> = Vec::new();
+    let mut loading_receiver: Option<Receiver<WorldBuildResult>> = None;
+    let mut loading_status = "Preparing world...".to_owned();
     let mut has_world = false;
 
     if let Some((saved_name, saved_seed, saved_style, saved_blocks)) = load_world() {
@@ -643,6 +679,11 @@ async fn main() {
     let mut pitch = -0.34_f32;
     let mut selected_block = 0_u8;
     let mut world_message = "Welcome to your world.".to_owned();
+    let mut game_mode = systems::GameMode::Survival;
+    let mut health = 20_u8;
+    let mut chat_open = false;
+    let mut chat_input = String::new();
+    let mut debug_overlay = false;
 
     loop {
         let dt = get_frame_time().min(0.05);
@@ -909,10 +950,9 @@ async fn main() {
                         Color::new(0.82, 0.87, 1.0, 1.0),
                     );
                     if button("PLAY SAVED WORLD", left + 34.0, top + 125.0, box_w - 68.0, 50.0) {
-                        camera_position = spawn_position(world_seed, world_style);
-                        yaw = 0.0;
-                        pitch = -0.34;
-                        screen = Screen::World;
+                        loading_status = "Building visible chunk meshes...".to_owned();
+                        loading_receiver = Some(spawn_mesh_build(blocks.clone(), occupied.clone()));
+                        screen = Screen::Loading;
                     }
                 } else {
                     label(
@@ -1033,24 +1073,9 @@ async fn main() {
                         world_name = "New World".to_owned();
                     }
 
-                    let generated = generate_world(world_seed, world_style);
-                    blocks = generated.0;
-                    occupied = generated.1;
-                    has_world = true;
-                    camera_position = spawn_position(world_seed, world_style);
-                    yaw = 0.0;
-                    pitch = -0.34;
-                    selected_block = 0;
-                    world_message = format!(
-                        "Generated {} terrain. Seed: {}",
-                        terrain_style_name(world_style),
-                        world_seed
-                    );
-                    match save_world(&world_name, world_seed, world_style, &blocks) {
-                        Ok(()) => world_status.clear(),
-                        Err(message) => world_status = message,
-                    }
-                    screen = Screen::World;
+                    loading_status = "Generating terrain and building chunk meshes...".to_owned();
+                    loading_receiver = Some(spawn_generated_world_build(world_seed, world_style));
+                    screen = Screen::Loading;
                 }
                 if button("BACK TO MENU", left + 36.0, top + 417.0, field_w, 34.0) {
                     screen = Screen::Menu;
@@ -1063,46 +1088,159 @@ async fn main() {
                     Color::new(1.0, 0.62, 0.56, 1.0),
                 );
             }
+            Screen::Loading => {
+                let completed = match loading_receiver.as_ref() {
+                    Some(receiver) => match receiver.try_recv() {
+                        Ok(payload) => Some(Ok(payload)),
+                        Err(TryRecvError::Empty) => None,
+                        Err(TryRecvError::Disconnected) => Some(Err(())),
+                    },
+                    None => Some(Err(())),
+                };
+
+                match completed {
+                    Some(Ok((loaded_blocks, loaded_occupied, mesh_data))) => {
+                        blocks = loaded_blocks;
+                        occupied = loaded_occupied;
+                        fast_chunks = fast_render::upload_chunk_data(mesh_data, &textures);
+                        has_world = true;
+                        camera_position = spawn_position(world_seed, world_style);
+                        yaw = 0.0;
+                        pitch = -0.34;
+                        selected_block = 0;
+                        health = 20;
+                        world_message = format!(
+                            "{} world ready. Seed: {}",
+                            terrain_style_name(world_style),
+                            world_seed
+                        );
+                        if let Err(message) = save_world(&world_name, world_seed, world_style, &blocks) {
+                            world_message = message;
+                        }
+                        loading_receiver = None;
+                        chat_open = false;
+                        set_cursor_grab(true);
+                        show_mouse(false);
+                        screen = Screen::World;
+                    }
+                    Some(Err(())) => {
+                        loading_status = "World loading failed. Returning to menu.".to_owned();
+                        loading_receiver = None;
+                        screen = Screen::Menu;
+                    }
+                    None => {}
+                }
+
+                let width = screen_width();
+                let height = screen_height();
+                let pulse = (get_time() as f32 * 2.0).sin() * 0.5 + 0.5;
+                let panel_w = width.min(720.0) - 48.0;
+                let panel_x = (width - panel_w) * 0.5;
+                let panel_y = height * 0.40;
+                draw_rectangle(panel_x, panel_y, panel_w, 170.0, Color::new(0.012, 0.020, 0.060, 0.96));
+                draw_rectangle_lines(panel_x, panel_y, panel_w, 170.0, 1.5, Color::new(0.31, 0.48, 0.90, 0.9));
+                label("BUILDING YOUR WORLD", panel_x + 28.0, panel_y + 48.0, 30.0, WHITE);
+                label(&loading_status, panel_x + 30.0, panel_y + 82.0, 15.0, Color::new(0.72, 0.81, 1.0, 1.0));
+                let bar_x = panel_x + 30.0;
+                let bar_y = panel_y + 108.0;
+                let bar_w = panel_w - 60.0;
+                draw_rectangle(bar_x, bar_y, bar_w, 10.0, Color::new(0.10, 0.13, 0.23, 1.0));
+                let segment_w = (bar_w * 0.22).max(30.0);
+                let segment_x = bar_x + (bar_w - segment_w) * pulse;
+                draw_rectangle(segment_x, bar_y, segment_w, 10.0, Color::new(0.36, 0.57, 1.0, 1.0));
+                label("Terrain and mesh work runs away from the main frame loop.", panel_x + 30.0, panel_y + 146.0, 13.0, Color::new(0.58, 0.68, 0.88, 1.0));
+            }
             Screen::World => {
-                if is_key_pressed(KeyCode::Escape) {
+                if is_key_pressed(KeyCode::F3) {
+                    debug_overlay = !debug_overlay;
+                }
+
+                if !chat_open && is_key_pressed(KeyCode::Enter) {
+                    chat_open = true;
+                    chat_input.clear();
+                    set_cursor_grab(false);
+                    show_mouse(true);
+                } else if chat_open && is_key_pressed(KeyCode::Enter) {
+                    let submitted = chat_input.trim().to_owned();
+                    if !submitted.is_empty() {
+                        match systems::parse_chat_command(&submitted) {
+                            Ok(Some(mode)) => {
+                                game_mode = mode;
+                                world_message = format!("Game mode changed to {}.", game_mode.label());
+                            }
+                            Ok(None) => {
+                                world_message = format!("{}: {}", player_name, submitted);
+                            }
+                            Err(message) => world_message = message.to_owned(),
+                        }
+                    }
+                    chat_input.clear();
+                    chat_open = false;
+                    set_cursor_grab(true);
+                    show_mouse(false);
+                } else if chat_open && is_key_pressed(KeyCode::Escape) {
+                    chat_open = false;
+                    chat_input.clear();
+                    set_cursor_grab(true);
+                    show_mouse(false);
+                }
+
+                if chat_open {
+                    while let Some(ch) = get_char_pressed() {
+                        if !ch.is_control() && ch.is_ascii() && chat_input.len() < 120 {
+                            chat_input.push(ch);
+                        }
+                    }
+                    if is_key_pressed(KeyCode::Backspace) {
+                        chat_input.pop();
+                    }
+                } else if is_key_pressed(KeyCode::Escape) {
                     if let Err(message) = save_world(&world_name, world_seed, world_style, &blocks) {
                         world_message = message;
                     }
+                    set_cursor_grab(false);
+                    show_mouse(true);
                     screen = Screen::Menu;
                 }
 
-                if is_key_down(KeyCode::Left) {
+                let mouse_delta = if chat_open { Vec2::ZERO } else { mouse_delta_position() };
+                if !chat_open {
+                    yaw -= mouse_delta.x * 2.3;
+                    pitch = (pitch + mouse_delta.y * 2.3).clamp(-1.35, 1.35);
+                }
+
+                if !chat_open && is_key_down(KeyCode::Left) {
                     yaw -= 1.8 * dt;
                 }
-                if is_key_down(KeyCode::Right) {
+                if !chat_open && is_key_down(KeyCode::Right) {
                     yaw += 1.8 * dt;
                 }
-                if is_key_down(KeyCode::Up) {
+                if !chat_open && is_key_down(KeyCode::Up) {
                     pitch = (pitch + 1.2 * dt).clamp(-1.2, 1.2);
                 }
-                if is_key_down(KeyCode::Down) {
+                if !chat_open && is_key_down(KeyCode::Down) {
                     pitch = (pitch - 1.2 * dt).clamp(-1.2, 1.2);
                 }
 
                 let forward = vec3(yaw.sin(), 0.0, -yaw.cos());
                 let right = vec3(yaw.cos(), 0.0, yaw.sin());
                 let speed = if is_key_down(KeyCode::LeftShift) { 10.0 } else { 5.0 };
-                if is_key_down(KeyCode::W) {
+                if !chat_open && is_key_down(KeyCode::W) {
                     camera_position += forward * speed * dt;
                 }
-                if is_key_down(KeyCode::S) {
+                if !chat_open && is_key_down(KeyCode::S) {
                     camera_position -= forward * speed * dt;
                 }
-                if is_key_down(KeyCode::D) {
+                if !chat_open && is_key_down(KeyCode::D) {
                     camera_position += right * speed * dt;
                 }
-                if is_key_down(KeyCode::A) {
+                if !chat_open && is_key_down(KeyCode::A) {
                     camera_position -= right * speed * dt;
                 }
-                if is_key_down(KeyCode::Space) {
+                if !chat_open && is_key_down(KeyCode::Space) {
                     camera_position.y += speed * dt;
                 }
-                if is_key_down(KeyCode::LeftControl) {
+                if !chat_open && is_key_down(KeyCode::LeftControl) {
                     camera_position.y -= speed * dt;
                 }
 
@@ -1124,32 +1262,8 @@ async fn main() {
                 };
                 set_camera(&camera);
 
-                for block in &blocks {
-                    let dx = block.x as f32 - camera_position.x;
-                    let dy = block.y as f32 - camera_position.y;
-                    let dz = block.z as f32 - camera_position.z;
-                    if dx * dx + dy * dy + dz * dz > 1_000.0 {
-                        continue;
-                    }
-
-                    let position = vec3(block.x as f32, block.y as f32, block.z as f32);
-                    let tint = if block.kind == 6 {
-                        Color::new(0.80, 0.91, 1.0, 0.72)
-                    } else {
-                        WHITE
-                    };
-                    draw_cube(
-                        position,
-                        vec3(1.0, 1.0, 1.0),
-                        Some(&textures[block.kind as usize]),
-                        tint,
-                    );
-                    draw_cube_wires(
-                        position,
-                        vec3(1.002, 1.002, 1.002),
-                        Color::new(0.025, 0.035, 0.045, 0.35),
-                    );
-                }
+                let (visible_chunks, draw_calls) =
+                    fast_render::draw_visible_chunks(&fast_chunks, camera_position, 112.0);
 
                 let target = camera_position + look * 3.0;
                 let bx = target.x.round() as i32;
@@ -1165,7 +1279,7 @@ async fn main() {
                 if is_key_pressed(KeyCode::Key7) { selected_block = 6; }
                 if is_key_pressed(KeyCode::Key8) { selected_block = 7; }
 
-                if is_mouse_button_pressed(MouseButton::Left) {
+                if !chat_open && is_mouse_button_pressed(MouseButton::Left) {
                     if occupied.insert((bx, by, bz)) {
                         blocks.push(Block {
                             x: bx,
@@ -1179,9 +1293,12 @@ async fn main() {
                         {
                             world_message = message;
                         }
+                        fast_chunks = fast_render::upload_chunk_data(
+                            fast_render::build_chunk_data(&blocks, &occupied), &textures
+                        );
                     }
                 }
-                if is_mouse_button_pressed(MouseButton::Right) {
+                if !chat_open && is_mouse_button_pressed(MouseButton::Right) {
                     if let Some(index) = blocks
                         .iter()
                         .position(|block| block.x == bx && block.y == by && block.z == bz)
@@ -1194,6 +1311,9 @@ async fn main() {
                         {
                             world_message = message;
                         }
+                        fast_chunks = fast_render::upload_chunk_data(
+                            fast_render::build_chunk_data(&blocks, &occupied), &textures
+                        );
                     }
                 }
 
@@ -1227,7 +1347,7 @@ async fn main() {
                     Color::new(0.77, 0.84, 1.0, 1.0),
                 );
                 label(
-                    &format!("{} blocks   |   WASD move   |   arrows look", blocks.len()),
+                    &format!("{} blocks   |   {} mode   |   mouse look", blocks.len(), game_mode.label()),
                     30.0,
                     96.0,
                     13.0,
@@ -1297,12 +1417,40 @@ async fn main() {
                     Color::new(0.88, 0.91, 1.0, 1.0),
                 );
                 label(
-                    "LMB place  |  RMB remove  |  1-8 materials  |  ESC save & menu",
-                    screen_w - 420.0,
+                    "LMB place  |  RMB remove  |  1-8 materials  |  Enter chat  |  ESC save",
+                    screen_w - 520.0,
                     screen_h - 28.0,
                     12.0,
                     Color::new(0.95, 0.97, 1.0, 1.0),
                 );
+
+                // Performance HUD: always visible; F3 shows extra renderer counters.
+                let fps = get_fps();
+                let frame_ms = get_frame_time() * 1000.0;
+                draw_rectangle(
+                    screen_w - 158.0, 16.0, 142.0, 54.0,
+                    Color::new(0.012, 0.020, 0.055, 0.88),
+                );
+                draw_rectangle_lines(
+                    screen_w - 158.0, 16.0, 142.0, 54.0, 1.0,
+                    Color::new(0.30, 0.45, 0.84, 0.82),
+                );
+                label(&format!("FPS  {}", fps), screen_w - 146.0, 39.0, 18.0, Color::new(0.62, 1.0, 0.72, 1.0));
+                label(&format!("{:.1} ms/frame", frame_ms), screen_w - 146.0, 58.0, 12.0, WHITE);
+                systems::draw_hearts(health, 20);
+                if debug_overlay {
+                    draw_rectangle(screen_w - 252.0, 80.0, 236.0, 72.0, Color::new(0.012, 0.020, 0.055, 0.88));
+                    label(&format!("Visible chunks: {}", visible_chunks), screen_w - 240.0, 104.0, 13.0, WHITE);
+                    label(&format!("Mesh draw calls: {}", draw_calls), screen_w - 240.0, 124.0, 13.0, WHITE);
+                    label(&format!("Loaded chunks: {}", fast_chunks.len()), screen_w - 240.0, 144.0, 13.0, WHITE);
+                }
+                if chat_open {
+                    draw_rectangle(16.0, screen_h - 142.0, (screen_w - 32.0).min(760.0), 36.0, Color::new(0.012, 0.020, 0.055, 0.94));
+                    draw_rectangle_lines(16.0, screen_h - 142.0, (screen_w - 32.0).min(760.0), 36.0, 1.0, Color::new(0.38, 0.52, 0.92, 0.9));
+                    label(&format!("> {}", chat_input), 28.0, screen_h - 118.0, 17.0, WHITE);
+                    label("Enter: send  |  Esc: close  |  Example: !set GameMode creative", 24.0, screen_h - 96.0, 12.0, Color::new(0.72, 0.80, 1.0, 1.0));
+                }
+
             }
         }
 
