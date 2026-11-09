@@ -12,7 +12,7 @@ fn push(
     kind: u8,
 ) {
     if occupied.insert((x, y, z)) {
-        blocks.push(Block { x, y, z, kind });
+        blocks.push(Block { x, y, z, kind, placed: false });
     }
 }
 
@@ -103,7 +103,7 @@ pub fn build_region(
         .into_par_iter()
         .map(|(chunk_x, chunk_z)| {
             let (blocks, occupied) = generate_chunk(seed, style, chunk_x, chunk_z);
-            let mesh = fast_render::build_chunk_data(&blocks, &occupied);
+            let mesh = fast_render::build_chunk_data_smooth(&blocks, &occupied, seed, style);
             (blocks, occupied, mesh)
         })
         .collect();
