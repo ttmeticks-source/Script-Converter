@@ -12,31 +12,34 @@ RealismCraft is a standalone block-building game project written in Rust and Mac
 
 ## Current features
 
-- **Account screen:** first launch opens a create-account flow. Returning players sign in. The profile is stored locally and works offline; there is no online account server.
+- **Account screen:** first launch opens a create-account flow. Returning players can stay signed in between launches; the remembered session never stores the password. The profile is local and works offline.
 - **Password handling:** passwords are stored as salted PBKDF2-HMAC-SHA256 hashes, not as readable text.
 - **World setup:** choose a world name, enter a seed, or generate a random seed.
-- **Random terrain:** seeded Natural, Highlands, and Islands terrain presets, with layered ground, beaches, water, snowy areas, and scattered trees.
+- **Expanding procedural world:** deterministic 16×16 chunks generate around the player as they explore, with no fixed horizontal world edge. Natural, Highlands, and Islands presets include beaches, water, snowy areas, and scattered trees.
+- **Smooth landscape surface:** natural ground uses a continuous height-field mesh instead of rendering every dirt/grass/stone cube. Trees, water, and player-placed blocks remain separate models.
+- **Grass and soil layers:** grass terrain uses a green cap over visible soil edges.
 - **World saves:** the current world and placed/removed blocks are saved locally.
 - **Material textures:** procedural 128×128 surface textures for grass, dirt, stone, sand, wood, leaves, water, and snow. These are generated materials inspired by real surfaces, not photo-scanned decal packs.
 - **Chunk renderer:** 16×16 chunk meshes batch visible block faces by material; buried faces are omitted.
 - **Parallel loading:** terrain and CPU mesh construction run on worker threads with Rayon while a loading screen stays responsive.
 - **Performance HUD:** FPS and frame-time display, with F3 counters for visible chunks and mesh draw calls.
 - **First-person camera:** mouse-look with cursor capture, WASD movement, and vertical controls.
+- **Native performance settings:** requests Apple's Metal renderer and an uncapped swap interval where the driver supports it; actual FPS depends on the Mac and scene.
 - **Chat commands:** `!set GameMode creative`, `survival`, `adventure`, or `spectator`.
 - **Creative building:** place and remove blocks with a quick-select hotbar.
 - **Galaxy-style menus:** a custom first-run and main menu interface.
 
 ## Build from source
 
-Install a current stable Rust toolchain from [rustup.rs](https://rustup.rs/).
+### Install on macOS (one command)
 
-### macOS
+This downloads the latest source, builds an optimized native binary on your Mac, packages it as `RealismCraft.app`, and installs it in `/Applications`:
 
 ```sh
-git clone https://github.com/ttmeticks-source/Script-Converter.git
-cd Script-Converter
-cargo run --release
+curl -fsSL https://raw.githubusercontent.com/ttmeticks-source/Script-Converter/main/install-macos.sh | bash
 ```
+
+The installer requires Rust from [rustup.rs](https://rustup.rs/) and Apple's Command Line Tools. It may ask for your Mac password when copying the app into `/Applications`. Your account and worlds remain in `~/Library/Application Support/RealismCraft/`.
 
 ### Windows
 
@@ -52,7 +55,8 @@ cargo run --release
 
 - **WASD** — move
 - **Mouse** — look around (cursor is captured in-world)
-- **Enter** — open chat; type `!set GameMode creative` to switch modes
+- **- (minus key)** — open chat; type `!set GameMode creative` to switch modes
+- **Enter** — send the chat command
 - **F3** — show/hide renderer counters
 - **Space / Left Ctrl** — move up / down
 - **Left Shift** — move faster
@@ -74,7 +78,7 @@ The local profile is not connected to an authentication server and cannot be use
 ## Planned next milestones
 
 - Real multiplayer sessions with an explicit protocol/server bridge; current remote avatars are only a visual simulation.
-- Further performance work: chunk streaming, frustum culling, mesh reuse, and GPU-side rendering.
+- Further performance work: frustum culling, mesh reuse, and a more advanced GPU backend.
 - Higher-detail material maps, lighting, shadows, and ambient effects.
 - World selection and multiple save slots.
 - More biomes, caves, ores, and structures.
