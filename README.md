@@ -14,7 +14,7 @@ RealismCraft is a standalone block-building game project written in Rust and Mac
 
 - **Account screen:** first launch opens a create-account flow. Returning players can stay signed in between launches; the remembered session never stores the password. The profile is local and works offline.
 - **Password handling:** passwords are stored as salted PBKDF2-HMAC-SHA256 hashes, not as readable text.
-- **World setup:** choose a world name, enter a seed, or generate a random seed.
+- **World setup:** choose a world name, enter a seed or generate a random one, choose Natural / Highlands / Islands terrain, and select Survival, Creative, Adventure or Spectator before generating.
 - **Expanding procedural world:** deterministic 16×16 chunks generate around the player as they explore, with no fixed horizontal world edge. Natural, Highlands, and Islands presets include beaches, water, snowy areas, and scattered trees.
 - **Smooth landscape surface:** natural ground uses a continuous height-field mesh instead of rendering every dirt/grass/stone cube. Trees, water, and player-placed blocks remain separate models.
 - **Grass and soil layers:** grass terrain uses a green cap over visible soil edges.
@@ -25,15 +25,16 @@ RealismCraft is a standalone block-building game project written in Rust and Mac
 - **Performance HUD:** FPS and frame-time display, with F3 counters for visible chunks and mesh draw calls.
 - **First-person camera:** mouse-look with cursor capture, WASD movement, and vertical controls.
 - **Native performance settings:** requests Apple's Metal renderer and an uncapped swap interval where the driver supports it; actual FPS depends on the Mac and scene.
-- **Chat commands:** `!set GameMode creative`, `survival`, `adventure`, or `spectator`.
-- **Creative building:** place and remove blocks with a quick-select hotbar.
+- **Minecraft-style chat:** `/gamemode creative`, `/gamemode survival`, `/gamemode adventure`, `/gamemode spectator`, `/seed`, `/spawn`, and `/help`. The older `!set GameMode ...` syntax remains supported.
+- **Block editing:** left click breaks the targeted block; right click places the selected hotbar block. Chunk edits rebuild only the changed chunk.
+- **Sound effects:** short original, synthesized place / break / interface sounds are bundled in the game.
 - **Galaxy-style menus:** a custom first-run and main menu interface.
 
 ## Build from source
 
 ### Install on macOS (one command)
 
-This downloads the latest source, builds an optimized native binary on your Mac, packages it as `RealismCraft.app`, and installs it in `/Applications`:
+This downloads the latest source, builds an optimized native binary on your Mac, creates a custom `.icns` app icon, packages `RealismCraft.app`, and installs it in `/Applications`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ttmeticks-source/Script-Converter/main/install-macos.sh | bash
