@@ -66,7 +66,6 @@ fn build_one_chunk(
 
     for block in chunk_blocks {
         let kind = (block.kind.min(7)) as usize;
-        let target = &mut materials[kind];
 
         for (neighbor, corners, shade) in FACES {
             let adjacent = (
@@ -74,8 +73,28 @@ fn build_one_chunk(
                 block.y + neighbor.1,
                 block.z + neighbor.2,
             );
-            if !occupied.contains(&adjacent) {
-                append_face(target, block.x, block.y, block.z, corners, shade);
+            if occupied.contains(&adjacent) {
+                continue;
+            }
+
+            // One grass block: a turf cap over a soil body, with a narrow
+            // grassy lip on each exposed vertical side.
+            if kind == 0 && neighbor.1 == 0 {
+                append_face(&mut materials[1], block.x, block.y, block.z, corners, shade);
+                let mut grass_lip = corners;
+                grass_lip[0].1 = 0.34;
+                grass_lip[3].1 = 0.34;
+                append_face(&mut materials[0], block.x, block.y, block.z, grass_lip, shade * 1.04);
+            } else {
+                let face_material = if kind == 0 && neighbor.1 == -1 { 1 } else { kind };
+                append_face(
+                    &mut materials[face_material],
+                    block.x,
+                    block.y,
+                    block.z,
+                    corners,
+                    shade,
+                );
             }
         }
     }
