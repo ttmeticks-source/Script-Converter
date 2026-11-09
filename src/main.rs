@@ -48,6 +48,13 @@ fn window_conf() -> Conf {
         fullscreen: false,
         sample_count: 1,
         window_resizable: true,
+        platform: miniquad::conf::Platform {
+            // Ask the driver for an uncapped presentation interval and use
+            // Apple's native Metal backend where supported.
+            apple_gfx_api: miniquad::conf::AppleGfxApi::Metal,
+            swap_interval: Some(0),
+            ..Default::default()
+        },
         ..Default::default()
     }
 }
@@ -1446,7 +1453,7 @@ async fn main() {
                             world_message = message;
                         }
                         fast_chunks = fast_render::upload_chunk_data(
-                            fast_render::build_chunk_data(&blocks, &occupied), &textures
+                            fast_render::build_chunk_data_smooth(&blocks, &occupied, world_seed, world_style), &textures
                         );
                     }
                 }
