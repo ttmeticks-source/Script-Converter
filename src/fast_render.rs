@@ -186,6 +186,11 @@ fn add_smooth_ground_surface(chunk: &mut ChunkMeshData, seed: u64, style: u8) {
             let h10 = crate::terrain_height_smooth(seed, style, x + 1, z) + 0.035;
 
             let discrete_height = crate::terrain_height(seed, style, x, z);
+            // Removing the natural top block removes this surface quad too,
+            // allowing a dug column to expose the layer underneath.
+            if !occupied.contains(&(x, discrete_height, z)) {
+                continue;
+            }
             let temperature = crate::value_noise(
                 seed ^ 0x13a5ba1d4e7c902f,
                 x as f32 * 0.035,
@@ -239,7 +244,12 @@ pub fn build_chunk_data_smooth(
         .map(|((chunk_x, chunk_z), chunk_blocks)| {
             let visible_blocks = chunk_blocks
                 .into_iter()
-                .filter(|block| block.placed || block.kind >= 4)
+                .filter(|block| {
+                    block.placed
+                        || block.kind >= 4
+                        || (!occupied.contains(&(block.x, block.y + 1, block.z))
+                            && block.y < crate::terrain_height(seed, style, block.x, block.z))
+                })
                 .collect();
             let mut chunk = build_one_chunk(chunk_x, chunk_z, visible_blocks, occupied);
             add_smooth_ground_surface(&mut chunk, seed, style);
