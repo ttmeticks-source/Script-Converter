@@ -30,6 +30,7 @@ pub(crate) struct Block {
     pub(crate) y: i32,
     pub(crate) z: i32,
     pub(crate) kind: u8,
+    pub(crate) placed: bool,
 }
 
 struct LocalAccount {
@@ -220,8 +221,8 @@ fn save_world(
     let mut contents = format!("{}\n{}\n{}\n", name.replace('\n', " "), seed, style);
     for block in blocks {
         contents.push_str(&format!(
-            "{},{},{},{}\n",
-            block.x, block.y, block.z, block.kind
+            "{},{},{},{},{}\n",
+            block.x, block.y, block.z, block.kind, u8::from(block.placed)
         ));
     }
     fs::write(world_path(), contents)
@@ -242,8 +243,9 @@ fn load_world() -> Option<(String, u64, u8, Vec<Block>)> {
         let y = values.next()?.parse::<i32>().ok()?;
         let z = values.next()?.parse::<i32>().ok()?;
         let kind = values.next()?.parse::<u8>().ok()?;
+        let placed = values.next().and_then(|value| value.parse::<u8>().ok()).unwrap_or(0) != 0;
         if kind <= 7 {
-            blocks.push(Block { x, y, z, kind });
+            blocks.push(Block { x, y, z, kind, placed });
         }
     }
     Some((name, seed, style, blocks))
@@ -397,6 +399,23 @@ pub(crate) fn terrain_height(seed: u64, style: u8, x: i32, z: i32) -> i32 {
     shape.round() as i32
 }
 
+pub(crate) fn terrain_height_smooth(seed: u64, style: u8, x: i32, z: i32) -> f32 {
+    let broad = value_noise(seed, x as f32 * 0.055, z as f32 * 0.055);
+    let detail = value_noise(
+        seed ^ 0x5a17d3c49b82e601,
+        x as f32 * 0.17,
+        z as f32 * 0.17,
+    );
+    match style {
+        1 => 2.0 + broad * 14.0 + detail * 5.0,
+        2 => {
+            let island = ((broad - 0.25) / 0.75).clamp(0.0, 1.0);
+            1.0 + island * 12.0 + detail * 2.5
+        }
+        _ => 3.0 + broad * 8.0 + detail * 3.0,
+    }
+}
+
 fn push_block(
     blocks: &mut Vec<Block>,
     occupied: &mut HashSet<(i32, i32, i32)>,
@@ -406,7 +425,7 @@ fn push_block(
     kind: u8,
 ) {
     if occupied.insert((x, y, z)) {
-        blocks.push(Block { x, y, z, kind });
+        blocks.push(Block { x, y, z, kind, placed: false });
     }
 }
 
@@ -631,10 +650,12 @@ type WorldBuildResult = (
 fn spawn_mesh_build(
     blocks: Vec<Block>,
     occupied: HashSet<(i32, i32, i32)>,
+    seed: u64,
+    style: u8,
 ) -> Receiver<WorldBuildResult> {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
-        let meshes = fast_render::build_chunk_data(&blocks, &occupied);
+        let meshes = fast_render::build_chunk_data_smooth(&blocks, &occupied, seed, style);
         let _ = sender.send((blocks, occupied, meshes));
     });
     receiver
@@ -1007,7 +1028,7 @@ async fn main() {
                     );
                     if button("PLAY SAVED WORLD", left + 34.0, top + 125.0, box_w - 68.0, 50.0) {
                         loading_status = "Building visible chunk meshes...".to_owned();
-                        loading_receiver = Some(spawn_mesh_build(blocks.clone(), occupied.clone()));
+                        loading_receiver = Some(spawn_mesh_build(blocks.clone(), occupied.clone(), world_seed, world_style));
                         screen = Screen::Loading;
                     }
                 } else {
@@ -1398,6 +1419,7 @@ async fn main() {
                             y: by,
                             z: bz,
                             kind: selected_block,
+                            placed: true,
                         });
                         world_message = format!("Placed {}.", material_name(selected_block));
                         if let Err(message) =
@@ -1406,7 +1428,7 @@ async fn main() {
                             world_message = message;
                         }
                         fast_chunks = fast_render::upload_chunk_data(
-                            fast_render::build_chunk_data(&blocks, &occupied), &textures
+                            fast_render::build_chunk_data_smooth(&blocks, &occupied, world_seed, world_style), &textures
                         );
                     }
                 }
