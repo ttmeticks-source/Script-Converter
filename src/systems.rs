@@ -144,9 +144,6 @@ pub fn draw_hearts(health: u8, max_health: u8) {
             );
             draw_circle(x + 7.0, y + 8.0, 6.8, color);
             draw_circle(x + 19.0, y + 8.0, 6.8, color);
-            if color == base && filled_units > 0 {
-                // Keep the empty heart visible underneath a half/full fill.
-            }
         }
     }
 }
