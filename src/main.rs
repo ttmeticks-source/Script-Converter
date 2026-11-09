@@ -83,6 +83,27 @@ fn world_path() -> PathBuf {
     data_directory().join("world.dat")
 }
 
+fn session_path() -> PathBuf {
+    data_directory().join("session.dat")
+}
+
+fn remember_session(username: &str) {
+    if fs::create_dir_all(data_directory()).is_ok() {
+        // This remembers the local session, never the password.
+        let _ = fs::write(session_path(), username.trim());
+    }
+}
+
+fn session_is_remembered(account: &LocalAccount) -> bool {
+    fs::read_to_string(session_path())
+        .map(|saved| saved.trim().eq_ignore_ascii_case(&account.username))
+        .unwrap_or(false)
+}
+
+fn forget_session() {
+    let _ = fs::remove_file(session_path());
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -631,15 +652,22 @@ fn spawn_generated_world_build(seed: u64, style: u8) -> Receiver<WorldBuildResul
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut account = load_account();
-    let mut screen = if account.is_some() {
+    let remembered = account.as_ref().map(session_is_remembered).unwrap_or(false);
+    let mut screen = if remembered {
+        Screen::Menu
+    } else if account.is_some() {
         Screen::Login
     } else {
         Screen::CreateAccount
     };
-    let mut player_name = account
-        .as_ref()
-        .map(|saved| saved.username.clone())
-        .unwrap_or_default();
+    let mut player_name = if remembered {
+        account.as_ref().map(|saved| saved.username.clone()).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    if !remembered {
+        player_name = account.as_ref().map(|saved| saved.username.clone()).unwrap_or_default();
+    }
     let mut username_input = player_name.clone();
     let mut password_input = String::new();
     let mut confirm_input = String::new();
@@ -785,6 +813,7 @@ async fn main() {
                             Ok(saved) => {
                                 player_name = saved.username.clone();
                                 username_input = player_name.clone();
+                                remember_session(&saved.username);
                                 account = Some(saved);
                                 password_input.clear();
                                 confirm_input.clear();
@@ -887,6 +916,7 @@ async fn main() {
                         .unwrap_or(false);
                     if valid {
                         player_name = account.as_ref().unwrap().username.clone();
+                        remember_session(&player_name);
                         password_input.clear();
                         auth_status.clear();
                         screen = Screen::Menu;
@@ -973,6 +1003,7 @@ async fn main() {
                     screen = Screen::WorldSetup;
                 }
                 if button("SIGN OUT", left + 34.0, top + 260.0, box_w - 68.0, 42.0) {
+                    forget_session();
                     password_input.clear();
                     auth_status.clear();
                     username_input = player_name.clone();
@@ -1156,7 +1187,7 @@ async fn main() {
                 }
 
                 let mut chat_closed_this_frame = false;
-                if !chat_open && is_key_pressed(KeyCode::Enter) {
+                if !chat_open && (is_key_pressed(KeyCode::Minus) || is_key_pressed(KeyCode::Enter)) {
                     chat_open = true;
                     chat_input.clear();
                     set_cursor_grab(false);
@@ -1420,7 +1451,7 @@ async fn main() {
                     Color::new(0.88, 0.91, 1.0, 1.0),
                 );
                 label(
-                    "LMB place  |  RMB remove  |  1-8 materials  |  Enter chat  |  ESC save",
+                    "LMB place  |  RMB remove  |  1-8 materials  |  - chat  |  ESC save",
                     screen_w - 520.0,
                     screen_h - 28.0,
                     12.0,
