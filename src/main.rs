@@ -1155,6 +1155,7 @@ async fn main() {
                     debug_overlay = !debug_overlay;
                 }
 
+                let mut chat_closed_this_frame = false;
                 if !chat_open && is_key_pressed(KeyCode::Enter) {
                     chat_open = true;
                     chat_input.clear();
@@ -1176,11 +1177,13 @@ async fn main() {
                     }
                     chat_input.clear();
                     chat_open = false;
+                    chat_closed_this_frame = true;
                     set_cursor_grab(true);
                     show_mouse(false);
                 } else if chat_open && is_key_pressed(KeyCode::Escape) {
                     chat_open = false;
                     chat_input.clear();
+                    chat_closed_this_frame = true;
                     set_cursor_grab(true);
                     show_mouse(false);
                 }
@@ -1194,7 +1197,7 @@ async fn main() {
                     if is_key_pressed(KeyCode::Backspace) {
                         chat_input.pop();
                     }
-                } else if is_key_pressed(KeyCode::Escape) {
+                } else if !chat_closed_this_frame && is_key_pressed(KeyCode::Escape) {
                     if let Err(message) = save_world(&world_name, world_seed, world_style, &blocks) {
                         world_message = message;
                     }
@@ -1270,14 +1273,14 @@ async fn main() {
                 let by = target.y.round() as i32;
                 let bz = target.z.round() as i32;
 
-                if is_key_pressed(KeyCode::Key1) { selected_block = 0; }
-                if is_key_pressed(KeyCode::Key2) { selected_block = 1; }
-                if is_key_pressed(KeyCode::Key3) { selected_block = 2; }
-                if is_key_pressed(KeyCode::Key4) { selected_block = 3; }
-                if is_key_pressed(KeyCode::Key5) { selected_block = 4; }
-                if is_key_pressed(KeyCode::Key6) { selected_block = 5; }
-                if is_key_pressed(KeyCode::Key7) { selected_block = 6; }
-                if is_key_pressed(KeyCode::Key8) { selected_block = 7; }
+                if !chat_open && is_key_pressed(KeyCode::Key1) { selected_block = 0; }
+                if !chat_open && is_key_pressed(KeyCode::Key2) { selected_block = 1; }
+                if !chat_open && is_key_pressed(KeyCode::Key3) { selected_block = 2; }
+                if !chat_open && is_key_pressed(KeyCode::Key4) { selected_block = 3; }
+                if !chat_open && is_key_pressed(KeyCode::Key5) { selected_block = 4; }
+                if !chat_open && is_key_pressed(KeyCode::Key6) { selected_block = 5; }
+                if !chat_open && is_key_pressed(KeyCode::Key7) { selected_block = 6; }
+                if !chat_open && is_key_pressed(KeyCode::Key8) { selected_block = 7; }
 
                 if !chat_open && is_mouse_button_pressed(MouseButton::Left) {
                     if occupied.insert((bx, by, bz)) {
