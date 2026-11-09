@@ -1152,6 +1152,7 @@ async fn main() {
 
                 if button("CREATE NEW WORLD", left + 28.0, top + 296.0, main_w - 56.0, 51.0) {
                     world_name = "New World".to_owned();
+                    game_mode = systems::GameMode::Survival;
                     world_seed = random_seed();
                     seed_input = world_seed.to_string();
                     world_name_field = 0;
@@ -1203,8 +1204,9 @@ async fn main() {
                 let height = screen_height();
                 let box_w = 620.0_f32.min(width - 28.0);
                 let left = (width - box_w) * 0.5;
-                let top = (height - 468.0) * 0.5;
-                panel(left, top, box_w, 468.0);
+                let setup_height = 540.0;
+                let top = (height - setup_height) * 0.5;
+                panel(left, top, box_w, setup_height);
                 label("CREATE A WORLD", left + 36.0, top + 55.0, 36.0, WHITE);
                 label(
                     "A new landscape is generated from your seed.",
@@ -1272,7 +1274,20 @@ async fn main() {
                 if button(&style_label, left + 319.0, top + 300.0, 265.0, 42.0) {
                     world_style = (world_style + 1) % 3;
                 }
-                if button("GENERATE WORLD  /  PLAY", left + 36.0, top + 359.0, field_w, 49.0) {
+                let mode_button = format!("GAME MODE: {}  /  CLICK TO CHANGE", game_mode.label().to_uppercase());
+                if button(&mode_button, left + 36.0, top + 355.0, field_w, 42.0) {
+                    game_mode = match game_mode {
+                        systems::GameMode::Survival => systems::GameMode::Creative,
+                        systems::GameMode::Creative => systems::GameMode::Adventure,
+                        systems::GameMode::Adventure => systems::GameMode::Spectator,
+                        systems::GameMode::Spectator => systems::GameMode::Survival,
+                    };
+                    if let Some(sound) = &ui_sound {
+                        play_sound_once(sound);
+                    }
+                }
+
+                if button("GENERATE WORLD  /  PLAY", left + 36.0, top + 410.0, field_w, 49.0) {
                     let parsed_seed = seed_input.trim().parse::<u64>();
                     world_seed = parsed_seed.unwrap_or_else(|_| random_seed());
                     seed_input = world_seed.to_string();
@@ -1289,13 +1304,13 @@ async fn main() {
                     loading_receiver = Some(spawn_chunk_batch_build(world_seed, world_style, initial_chunks));
                     screen = Screen::Loading;
                 }
-                if button("BACK TO MENU", left + 36.0, top + 417.0, field_w, 34.0) {
+                if button("BACK TO MENU", left + 36.0, top + 468.0, field_w, 34.0) {
                     screen = Screen::Menu;
                 }
                 label(
                     &world_status,
                     left + 38.0,
-                    top + 459.0,
+                    top + 526.0,
                     12.0,
                     Color::new(1.0, 0.62, 0.56, 1.0),
                 );
@@ -1328,7 +1343,7 @@ async fn main() {
                             terrain_style_name(world_style),
                             world_seed
                         );
-                        if let Err(message) = save_world(&world_name, world_seed, world_style, &blocks) {
+                        if let Err(message) = save_world(&world_name, world_seed, world_style, game_mode, &blocks) {
                             world_message = message;
                         }
                         loading_receiver = None;
@@ -1403,15 +1418,34 @@ async fn main() {
                 } else if chat_open && is_key_pressed(KeyCode::Enter) {
                     let submitted = chat_input.trim().to_owned();
                     if !submitted.is_empty() {
-                        match systems::parse_chat_command(&submitted) {
-                            Ok(Some(mode)) => {
-                                game_mode = mode;
-                                world_message = format!("Game mode changed to {}.", game_mode.label());
+                        if submitted.eq_ignore_ascii_case("/help") {
+                            world_message = "Commands: /gamemode <mode>, /seed, /spawn, /help".to_owned();
+                        } else if submitted.eq_ignore_ascii_case("/seed") {
+                            world_message = format!("World seed: {}", world_seed);
+                        } else if submitted.eq_ignore_ascii_case("/spawn") {
+                            camera_position = spawn_position(world_seed, world_style);
+                            yaw = 0.0;
+                            pitch = -0.34;
+                            world_message = "Returned to world spawn.".to_owned();
+                        } else {
+                            match systems::parse_chat_command(&submitted) {
+                                Ok(Some(mode)) => {
+                                    game_mode = mode;
+                                    world_message = format!("Game mode changed to {}.", game_mode.label());
+                                    if let Err(message) =
+                                        save_world(&world_name, world_seed, world_style, game_mode, &blocks)
+                                    {
+                                        world_message = message;
+                                    }
+                                }
+                                Ok(None) if submitted.starts_with('/') => {
+                                    world_message = "Unknown command. Type /help.".to_owned();
+                                }
+                                Ok(None) => {
+                                    world_message = format!("{}: {}", player_name, submitted);
+                                }
+                                Err(message) => world_message = message.to_owned(),
                             }
-                            Ok(None) => {
-                                world_message = format!("{}: {}", player_name, submitted);
-                            }
-                            Err(message) => world_message = message.to_owned(),
                         }
                     }
                     chat_input.clear();
@@ -1437,7 +1471,7 @@ async fn main() {
                         chat_input.pop();
                     }
                 } else if !chat_closed_this_frame && is_key_pressed(KeyCode::Escape) {
-                    if let Err(message) = save_world(&world_name, world_seed, world_style, &blocks) {
+                    if let Err(message) = save_world(&world_name, world_seed, world_style, game_mode, &blocks) {
                         world_message = message;
                     }
                     set_cursor_grab(false);
@@ -1525,12 +1559,7 @@ async fn main() {
                 set_camera(&camera);
 
                 let (visible_chunks, draw_calls) =
-                    fast_render::draw_visible_chunks(&fast_chunks, camera_position, 112.0);
-
-                let target = camera_position + look * 3.0;
-                let bx = target.x.round() as i32;
-                let by = target.y.round() as i32;
-                let bz = target.z.round() as i32;
+                    fast_render::draw_visible_chunks(&fast_chunks, camera_position, look, 78.0);
 
                 if !chat_open && is_key_pressed(KeyCode::Key1) { selected_block = 0; }
                 if !chat_open && is_key_pressed(KeyCode::Key2) { selected_block = 1; }
@@ -1541,42 +1570,80 @@ async fn main() {
                 if !chat_open && is_key_pressed(KeyCode::Key7) { selected_block = 6; }
                 if !chat_open && is_key_pressed(KeyCode::Key8) { selected_block = 7; }
 
+                // Minecraft-style controls: left click breaks, right click places.
                 if !chat_open && is_mouse_button_pressed(MouseButton::Left) {
-                    if occupied.insert((bx, by, bz)) {
-                        blocks.push(Block {
-                            x: bx,
-                            y: by,
-                            z: bz,
-                            kind: selected_block,
-                            placed: true,
-                        });
-                        world_message = format!("Placed {}.", material_name(selected_block));
-                        if let Err(message) =
-                            save_world(&world_name, world_seed, world_style, &blocks)
-                        {
-                            world_message = message;
+                    if !matches!(game_mode, systems::GameMode::Survival | systems::GameMode::Creative) {
+                        world_message = "Block breaking is disabled in this game mode.".to_owned();
+                    } else if let Some((hit_cell, _)) =
+                        raycast_block(camera_position, look, &occupied, 7.0)
+                    {
+                        if let Some(index) = blocks.iter().rposition(|block| {
+                            (block.x, block.y, block.z) == hit_cell
+                        }) {
+                            let removed = blocks.remove(index);
+                            occupied.remove(&(removed.x, removed.y, removed.z));
+                            world_message = format!("Broke {}.", material_name(removed.kind));
+                            let chunk_x = removed.x.div_euclid(fast_render::CHUNK_SIZE);
+                            let chunk_z = removed.z.div_euclid(fast_render::CHUNK_SIZE);
+                            fast_render::rebuild_one_chunk(
+                                &mut fast_chunks,
+                                &blocks,
+                                &occupied,
+                                world_seed,
+                                world_style,
+                                chunk_x,
+                                chunk_z,
+                                &textures,
+                            );
+                            if let Some(sound) = &break_sound {
+                                play_sound_once(sound);
+                            }
+                            if let Err(message) =
+                                save_world(&world_name, world_seed, world_style, game_mode, &blocks)
+                            {
+                                world_message = message;
+                            }
                         }
-                        fast_chunks = fast_render::upload_chunk_data(
-                            fast_render::build_chunk_data_smooth(&blocks, &occupied, world_seed, world_style), &textures
-                        );
                     }
                 }
+
                 if !chat_open && is_mouse_button_pressed(MouseButton::Right) {
-                    if let Some(index) = blocks
-                        .iter()
-                        .position(|block| block.x == bx && block.y == by && block.z == bz)
+                    if !matches!(game_mode, systems::GameMode::Survival | systems::GameMode::Creative) {
+                        world_message = "Block placing is disabled in this game mode.".to_owned();
+                    } else if let Some((_, place_cell)) =
+                        raycast_block(camera_position, look, &occupied, 7.0)
                     {
-                        let removed = blocks.remove(index);
-                        occupied.remove(&(removed.x, removed.y, removed.z));
-                        world_message = format!("Removed {}.", material_name(removed.kind));
-                        if let Err(message) =
-                            save_world(&world_name, world_seed, world_style, &blocks)
-                        {
-                            world_message = message;
+                        if occupied.insert(place_cell) {
+                            let (px, py, pz) = place_cell;
+                            blocks.push(Block {
+                                x: px,
+                                y: py,
+                                z: pz,
+                                kind: selected_block,
+                                placed: true,
+                            });
+                            world_message = format!("Placed {}.", material_name(selected_block));
+                            let chunk_x = px.div_euclid(fast_render::CHUNK_SIZE);
+                            let chunk_z = pz.div_euclid(fast_render::CHUNK_SIZE);
+                            fast_render::rebuild_one_chunk(
+                                &mut fast_chunks,
+                                &blocks,
+                                &occupied,
+                                world_seed,
+                                world_style,
+                                chunk_x,
+                                chunk_z,
+                                &textures,
+                            );
+                            if let Some(sound) = &place_sound {
+                                play_sound_once(sound);
+                            }
+                            if let Err(message) =
+                                save_world(&world_name, world_seed, world_style, game_mode, &blocks)
+                            {
+                                world_message = message;
+                            }
                         }
-                        fast_chunks = fast_render::upload_chunk_data(
-                            fast_render::build_chunk_data_smooth(&blocks, &occupied, world_seed, world_style), &textures
-                        );
                     }
                 }
 
@@ -1680,7 +1747,7 @@ async fn main() {
                     Color::new(0.88, 0.91, 1.0, 1.0),
                 );
                 label(
-                    "LMB place  |  RMB remove  |  1-8 materials  |  - chat  |  ESC save",
+                    "LEFT CLICK break  |  RIGHT CLICK place  |  1-8 hotbar  |  - chat  |  ESC save",
                     screen_w - 520.0,
                     screen_h - 28.0,
                     12.0,
@@ -1711,7 +1778,7 @@ async fn main() {
                     draw_rectangle(16.0, screen_h - 142.0, (screen_w - 32.0).min(760.0), 36.0, Color::new(0.012, 0.020, 0.055, 0.94));
                     draw_rectangle_lines(16.0, screen_h - 142.0, (screen_w - 32.0).min(760.0), 36.0, 1.0, Color::new(0.38, 0.52, 0.92, 0.9));
                     label(&format!("> {}", chat_input), 28.0, screen_h - 118.0, 17.0, WHITE);
-                    label("Enter: send  |  Esc: close  |  Example: !set GameMode creative", 24.0, screen_h - 96.0, 12.0, Color::new(0.72, 0.80, 1.0, 1.0));
+                    label("Enter: send  |  Esc: close  |  Try /gamemode creative or /help", 24.0, screen_h - 96.0, 12.0, Color::new(0.72, 0.80, 1.0, 1.0));
                 }
 
             }
