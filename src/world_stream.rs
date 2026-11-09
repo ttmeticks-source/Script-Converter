@@ -64,24 +64,45 @@ pub fn generate_chunk(seed: u64, style: u8, chunk_x: i32, chunk_z: i32) -> (Vec<
             }
 
             let tree_roll = crate::hash01(seed ^ 0x6f2a91c5d3e84017, x, z);
-            if surface_kind == 0 && height > SEA_LEVEL + 1 && tree_roll > 0.988 {
-                for y in height + 1..=height + 4 {
+            // Leave a two-block margin so rounded canopies are never cut at
+            // chunk edges. Candidate positions remain seed-deterministic.
+            let inside_tree_margin = local_x >= 2
+                && local_x < fast_render::CHUNK_SIZE - 2
+                && local_z >= 2
+                && local_z < fast_render::CHUNK_SIZE - 2;
+            if surface_kind == 0
+                && height > SEA_LEVEL + 1
+                && inside_tree_margin
+                && tree_roll > 0.987
+            {
+                let height_roll = crate::hash01(seed ^ 0x32a8d17c5e9046bf, x, z);
+                let trunk_height = 4 + (height_roll * 2.0) as i32;
+                for y in height + 1..=height + trunk_height {
                     push(&mut blocks, &mut occupied, x, y, z, 4);
                 }
-                for dy in 2..=4 {
-                    let radius: i32 = if dy == 4 { 1 } else { 2 };
-                    for dx in -radius..=radius {
-                        for dz in -radius..=radius {
-                            if dx.abs() + dz.abs() <= radius + 1 {
-                                // Keep each tree inside its owning chunk. The next
-                                // chunk will generate its own trees deterministically.
-                                let tx = x + dx;
-                                let tz = z + dz;
-                                if tx >= start_x && tx < start_x + fast_render::CHUNK_SIZE
-                                    && tz >= start_z && tz < start_z + fast_render::CHUNK_SIZE
-                                {
-                                    push(&mut blocks, &mut occupied, tx, height + dy, tz, 5);
-                                }
+
+                // A rounded, slightly irregular crown replaces the old flat
+                // stacked leaf plates. The trunk stays visible through its base.
+                let crown_center = height + trunk_height - 1;
+                for dy in -2_i32..=2 {
+                    for dx in -2_i32..=2 {
+                        for dz in -2_i32..=2 {
+                            let distance = (dx * dx + dz * dz) as f32
+                                + (dy * dy) as f32 * 1.12;
+                            let variation = (crate::hash01(
+                                seed ^ 0x94c7e2a1b36d508f,
+                                x + dx,
+                                z + dz + dy * 17,
+                            ) - 0.5) * 0.9;
+                            if distance <= 6.1 + variation {
+                                push(
+                                    &mut blocks,
+                                    &mut occupied,
+                                    x + dx,
+                                    crown_center + dy,
+                                    z + dz,
+                                    5,
+                                );
                             }
                         }
                     }
