@@ -285,6 +285,25 @@ fn label(text: &str, x: f32, y: f32, size: f32, color: Color) {
     draw_text(text, x, y, size, color);
 }
 
+/// Fit dynamic HUD text to a pixel width so long player/world names and
+/// status messages cannot draw over neighbouring panels.
+fn fit_text(text: &str, max_width: f32, font_size: f32) -> String {
+    if measure_text(text, None, font_size as u16, 1.0).width <= max_width {
+        return text.to_owned();
+    }
+
+    let suffix = "...";
+    let suffix_width = measure_text(suffix, None, font_size as u16, 1.0).width;
+    let mut fitted = text.to_owned();
+    while !fitted.is_empty()
+        && measure_text(&fitted, None, font_size as u16, 1.0).width + suffix_width > max_width
+    {
+        fitted.pop();
+    }
+    fitted.push_str(suffix);
+    fitted
+}
+
 fn button(text: &str, x: f32, y: f32, w: f32, h: f32) -> bool {
     let (mx, my) = mouse_position();
     let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
@@ -528,7 +547,7 @@ fn generate_world(
 fn material_texture(kind: u8) -> Texture2D {
     let mut image = Image::gen_image_color(128, 128, WHITE);
     let base = match kind {
-        0 => (83.0, 133.0, 56.0),
+        0 => (70.0, 116.0, 40.0),
         1 => (112.0, 76.0, 49.0),
         2 => (118.0, 124.0, 132.0),
         3 => (194.0, 174.0, 119.0),
@@ -560,10 +579,31 @@ fn material_texture(kind: u8) -> Texture2D {
 
             match kind {
                 0 => {
-                    if grain > 0.90 {
-                        shade *= 1.24;
-                    } else if grain < 0.10 {
-                        shade *= 0.72;
+                    // Layered low/mid frequency patches give the turf a
+                    // natural mix of dark clumps, fresh blades and tiny flecks.
+                    let broad_patch = value_noise(
+                        0x4c71a2e93d8056bf,
+                        x as f32 * 0.026,
+                        y as f32 * 0.026,
+                    );
+                    let blade_cluster = value_noise(
+                        0xd19b35a70c6248ef,
+                        x as f32 * 0.115,
+                        y as f32 * 0.115,
+                    );
+                    let blade_line = ((x as f32 * 0.32
+                        + (y as f32 * 0.045).sin() * 2.1)
+                        .sin()
+                        * 0.5)
+                        + 0.5;
+                    shade *= 0.70 + broad_patch * 0.23 + blade_cluster * 0.20;
+                    if blade_line > 0.88 && fine > 0.35 {
+                        shade *= 1.16;
+                    } else if blade_line < 0.11 && grain < 0.62 {
+                        shade *= 0.80;
+                    }
+                    if grain > 0.972 {
+                        shade *= 1.18;
                     }
                 }
                 1 => {
@@ -628,9 +668,12 @@ fn material_texture(kind: u8) -> Texture2D {
                 }
             }
 
-            let red = (base.0 * shade).clamp(0.0, 255.0) as u8;
-            let green = (base.1 * shade).clamp(0.0, 255.0) as u8;
-            let blue = (base.2 * shade).clamp(0.0, 255.0) as u8;
+            let red_tint = if kind == 0 { 0.94 + broad_grain * 0.12 } else { 1.0 };
+            let green_tint = if kind == 0 { 0.98 + grain * 0.12 } else { 1.0 };
+            let blue_tint = if kind == 0 { 0.92 + fine * 0.08 } else { 1.0 };
+            let red = (base.0 * shade * red_tint).clamp(0.0, 255.0) as u8;
+            let green = (base.1 * shade * green_tint).clamp(0.0, 255.0) as u8;
+            let blue = (base.2 * shade * blue_tint).clamp(0.0, 255.0) as u8;
             image.set_pixel(x, y, Color::from_rgba(red, green, blue, 255));
         }
     }
@@ -1421,7 +1464,7 @@ async fn main() {
                 }
 
                 let mut chat_closed_this_frame = false;
-                if !chat_open && (is_key_pressed(KeyCode::Minus) || is_key_pressed(KeyCode::Enter)) {
+                if !chat_open && is_key_pressed(KeyCode::Minus) {
                     chat_open = true;
                     chat_input.clear();
                     set_cursor_grab(false);
