@@ -455,7 +455,7 @@ fn generate_world(
 }
 
 fn material_texture(kind: u8) -> Texture2D {
-    let mut image = Image::gen_image_color(32, 32, WHITE);
+    let mut image = Image::gen_image_color(128, 128, WHITE);
     let base = match kind {
         0 => (83.0, 133.0, 56.0),
         1 => (112.0, 76.0, 49.0),
@@ -467,8 +467,8 @@ fn material_texture(kind: u8) -> Texture2D {
         _ => (215.0, 224.0, 231.0),
     };
 
-    for y in 0..32_u32 {
-        for x in 0..32_u32 {
+    for y in 0..128_u32 {
+        for x in 0..128_u32 {
             let grain = hash01(
                 0x7b3d91e5a6c2048f ^ kind as u64,
                 x as i32,
@@ -479,54 +479,80 @@ fn material_texture(kind: u8) -> Texture2D {
                 x as i32 * 3,
                 y as i32 * 3,
             );
-            let mut shade = 0.78 + grain * 0.34 + fine * 0.12;
+            let broad_grain = value_noise(
+                0x8db24c719e35a601 ^ kind as u64,
+                x as f32 * 0.045,
+                y as f32 * 0.045,
+            );
+            let mut shade =
+                0.77 + grain * 0.24 + fine * 0.10 + (broad_grain - 0.5) * 0.24;
 
             match kind {
                 0 => {
-                    if grain > 0.88 {
-                        shade *= 1.18;
-                    }
-                }
-                1 => {
-                    if (x + y * 3) % 11 == 0 {
+                    if grain > 0.90 {
+                        shade *= 1.24;
+                    } else if grain < 0.10 {
                         shade *= 0.72;
                     }
                 }
-                2 => {
-                    let vein = value_noise(0x1928374655aaee11, x as f32 * 0.19, y as f32 * 0.19);
-                    if (vein - 0.5).abs() < 0.045 {
-                        shade *= 0.68;
-                    }
+                1 => {
+                    let soil_patch = value_noise(
+                        0x43a91c7e25b608df,
+                        x as f32 * 0.11,
+                        y as f32 * 0.11,
+                    );
+                    shade *= 0.86 + soil_patch * 0.25;
                     if grain > 0.94 {
-                        shade *= 1.24;
+                        shade *= 0.66;
+                    }
+                }
+                2 => {
+                    let vein = value_noise(
+                        0x1928374655aaee11,
+                        x as f32 * 0.075,
+                        y as f32 * 0.075,
+                    );
+                    if (vein - 0.5).abs() < 0.025 {
+                        shade *= 0.62;
+                    }
+                    if grain > 0.965 {
+                        shade *= 1.30;
                     }
                 }
                 3 => {
-                    if (y % 7 == 0) && grain > 0.25 {
-                        shade *= 0.88;
+                    let ripple =
+                        ((y as f32 * 0.21 + x as f32 * 0.035).sin() + 1.0) * 0.045;
+                    shade += ripple;
+                    if grain > 0.94 {
+                        shade *= 1.12;
                     }
                 }
                 4 => {
-                    if x % 8 <= 1 {
-                        shade *= 0.62;
-                    } else if x % 8 == 2 {
-                        shade *= 0.82;
+                    let bark_wave =
+                        ((x as f32 * 0.22 + (y as f32 * 0.017).sin() * 2.0).sin() + 1.0)
+                            * 0.08;
+                    shade += bark_wave;
+                    if x % 19 <= 1 {
+                        shade *= 0.60;
                     }
                 }
                 5 => {
-                    if grain > 0.78 {
-                        shade *= 0.70;
-                    } else if grain < 0.18 {
-                        shade *= 1.18;
+                    if grain > 0.80 {
+                        shade *= 0.65;
+                    } else if grain < 0.16 {
+                        shade *= 1.22;
                     }
                 }
                 6 => {
-                    let ripple = ((y as f32 * 0.8 + x as f32 * 0.18).sin() + 1.0) * 0.08;
+                    let ripple =
+                        ((y as f32 * 0.18 + x as f32 * 0.045).sin() + 1.0) * 0.09;
                     shade += ripple;
                 }
                 _ => {
-                    if grain > 0.91 {
-                        shade *= 0.83;
+                    if grain > 0.93 {
+                        shade *= 0.78;
+                    } else if grain < 0.08 {
+                        shade *= 1.10;
                     }
                 }
             }
