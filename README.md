@@ -13,6 +13,7 @@ RealismCraft is an original block-building game project written in Rust. It is n
 ## What is planned
 
 - A custom galaxy-inspired launcher and first-run player-name setup.
+- Optional online wallpaper gallery, with a built-in galaxy background and user-selectable backgrounds.
 - Creative building with an expanding library of original blocks.
 - Procedural worlds and local save files.
 - High-quality lighting, materials, and optional visual effects.
