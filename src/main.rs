@@ -1,5 +1,6 @@
 mod fast_render;
 mod systems;
+mod world_stream;
 
 use macroquad::prelude::*;
 use pbkdf2::pbkdf2_hmac;
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 const PASSWORD_ROUNDS: u32 = 120_000;
-const SEA_LEVEL: i32 = 4;
+pub(crate) const SEA_LEVEL: i32 = 4;
 const WORLD_RADIUS: i32 = 18;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -344,7 +345,7 @@ fn galaxy_background() {
     }
 }
 
-fn hash01(seed: u64, x: i32, z: i32) -> f32 {
+pub(crate) fn hash01(seed: u64, x: i32, z: i32) -> f32 {
     let mut value = seed
         ^ (x as i64 as u64).wrapping_mul(0x9e3779b185ebca87)
         ^ (z as i64 as u64)
@@ -362,7 +363,7 @@ fn smooth(value: f32) -> f32 {
     value * value * (3.0 - 2.0 * value)
 }
 
-fn value_noise(seed: u64, x: f32, z: f32) -> f32 {
+pub(crate) fn value_noise(seed: u64, x: f32, z: f32) -> f32 {
     let x0 = x.floor() as i32;
     let z0 = z.floor() as i32;
     let tx = smooth(x - x.floor());
@@ -378,7 +379,7 @@ fn value_noise(seed: u64, x: f32, z: f32) -> f32 {
     top + (bottom - top) * tz
 }
 
-fn terrain_height(seed: u64, style: u8, x: i32, z: i32) -> i32 {
+pub(crate) fn terrain_height(seed: u64, style: u8, x: i32, z: i32) -> i32 {
     let broad = value_noise(seed, x as f32 * 0.055, z as f32 * 0.055);
     let detail = value_noise(
         seed ^ 0x5a17d3c49b82e601,
@@ -639,14 +640,32 @@ fn spawn_mesh_build(
     receiver
 }
 
-fn spawn_generated_world_build(seed: u64, style: u8) -> Receiver<WorldBuildResult> {
+fn region_coordinates(center_x: i32, center_z: i32, radius: i32) -> Vec<(i32, i32)> {
+    let mut coordinates = Vec::new();
+    for chunk_x in center_x - radius..=center_x + radius {
+        for chunk_z in center_z - radius..=center_z + radius {
+            coordinates.push((chunk_x, chunk_z));
+        }
+    }
+    coordinates
+}
+
+fn spawn_chunk_batch_build(
+    seed: u64,
+    style: u8,
+    coordinates: Vec<(i32, i32)>,
+) -> Receiver<WorldBuildResult> {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
-        let (blocks, occupied) = generate_world(seed, style);
-        let meshes = fast_render::build_chunk_data(&blocks, &occupied);
-        let _ = sender.send((blocks, occupied, meshes));
+        let result = world_stream::build_region(seed, style, coordinates);
+        let _ = sender.send(result);
     });
     receiver
+}
+
+fn spawn_generated_world_build(seed: u64, style: u8) -> Receiver<WorldBuildResult> {
+    // Start with a 7x7 area around spawn. The rest is streamed as the player moves.
+    spawn_chunk_batch_build(seed, style, region_coordinates(0, 0, 3))
 }
 
 #[macroquad::main(window_conf)]
@@ -683,6 +702,9 @@ async fn main() {
     let mut blocks = Vec::new();
     let mut occupied = HashSet::new();
     let mut fast_chunks: Vec<fast_render::FastChunk> = Vec::new();
+    let mut requested_chunks: HashSet<(i32, i32)> = HashSet::new();
+    let mut pending_chunks: HashSet<(i32, i32)> = HashSet::new();
+    let mut stream_receiver: Option<Receiver<WorldBuildResult>> = None;
     let mut loading_receiver: Option<Receiver<WorldBuildResult>> = None;
     let mut loading_status = "Preparing world...".to_owned();
     let mut has_world = false;
@@ -694,6 +716,10 @@ async fn main() {
         world_style = saved_style;
         for block in saved_blocks {
             occupied.insert((block.x, block.y, block.z));
+            requested_chunks.insert((
+                block.x.div_euclid(fast_render::CHUNK_SIZE),
+                block.z.div_euclid(fast_render::CHUNK_SIZE),
+            ));
             blocks.push(block);
         }
         has_world = true;
@@ -1104,8 +1130,13 @@ async fn main() {
                         world_name = "New World".to_owned();
                     }
 
-                    loading_status = "Generating terrain and building chunk meshes...".to_owned();
-                    loading_receiver = Some(spawn_generated_world_build(world_seed, world_style));
+                    loading_status = "Generating the spawn region and building chunk meshes...".to_owned();
+                    requested_chunks.clear();
+                    pending_chunks.clear();
+                    stream_receiver = None;
+                    let initial_chunks = region_coordinates(0, 0, 3);
+                    pending_chunks.extend(initial_chunks.iter().copied());
+                    loading_receiver = Some(spawn_chunk_batch_build(world_seed, world_style, initial_chunks));
                     screen = Screen::Loading;
                 }
                 if button("BACK TO MENU", left + 36.0, top + 417.0, field_w, 34.0) {
@@ -1133,6 +1164,8 @@ async fn main() {
                     Some(Ok((loaded_blocks, loaded_occupied, mesh_data))) => {
                         blocks = loaded_blocks;
                         occupied = loaded_occupied;
+                        requested_chunks.extend(mesh_data.iter().map(|mesh| (mesh.chunk_x, mesh.chunk_z)));
+                        pending_chunks.clear();
                         fast_chunks = fast_render::upload_chunk_data(mesh_data, &textures);
                         has_world = true;
                         camera_position = spawn_position(world_seed, world_style);
@@ -1182,6 +1215,31 @@ async fn main() {
                 label("Terrain and mesh work runs away from the main frame loop.", panel_x + 30.0, panel_y + 146.0, 13.0, Color::new(0.58, 0.68, 0.88, 1.0));
             }
             Screen::World => {
+                // Receive streamed chunks without stopping the render loop.
+                let stream_result = stream_receiver.as_ref().and_then(|receiver| {
+                    match receiver.try_recv() {
+                        Ok(result) => Some(Ok(result)),
+                        Err(TryRecvError::Empty) => None,
+                        Err(TryRecvError::Disconnected) => Some(Err(())),
+                    }
+                });
+                match stream_result {
+                    Some(Ok((new_blocks, new_occupied, new_mesh_data))) => {
+                        blocks.extend(new_blocks);
+                        occupied.extend(new_occupied);
+                        requested_chunks.extend(new_mesh_data.iter().map(|mesh| (mesh.chunk_x, mesh.chunk_z)));
+                        fast_chunks.extend(fast_render::upload_chunk_data(new_mesh_data, &textures));
+                        pending_chunks.clear();
+                        stream_receiver = None;
+                    }
+                    Some(Err(())) => {
+                        pending_chunks.clear();
+                        stream_receiver = None;
+                        world_message = "A terrain chunk failed to load; it will be retried.".to_owned();
+                    }
+                    None => {}
+                }
+
                 if is_key_pressed(KeyCode::F3) {
                     debug_overlay = !debug_overlay;
                 }
@@ -1276,6 +1334,26 @@ async fn main() {
                 }
                 if !chat_open && is_key_down(KeyCode::LeftControl) {
                     camera_position.y -= speed * dt;
+                }
+
+                // The world has no horizontal border: request any missing chunks
+                // within the active 9x9 region around the player's current chunk.
+                if stream_receiver.is_none() {
+                    let center_chunk_x = (camera_position.x.floor() as i32).div_euclid(fast_render::CHUNK_SIZE);
+                    let center_chunk_z = (camera_position.z.floor() as i32).div_euclid(fast_render::CHUNK_SIZE);
+                    let mut missing = Vec::new();
+                    for chunk_x in center_chunk_x - 4..=center_chunk_x + 4 {
+                        for chunk_z in center_chunk_z - 4..=center_chunk_z + 4 {
+                            let coordinate = (chunk_x, chunk_z);
+                            if !requested_chunks.contains(&coordinate) && !pending_chunks.contains(&coordinate) {
+                                missing.push(coordinate);
+                            }
+                        }
+                    }
+                    if !missing.is_empty() {
+                        pending_chunks.extend(missing.iter().copied());
+                        stream_receiver = Some(spawn_chunk_batch_build(world_seed, world_style, missing));
+                    }
                 }
 
                 let look = vec3(
