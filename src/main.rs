@@ -277,16 +277,22 @@ async fn main() {
                     up: Vec3::Y,
                     fovy: 65.0,
                     aspect: None,
-                    near: 0.05,
-                    far: 500.0,
+                    z_near: 0.05,
+                    z_far: 500.0,
                     viewport: None,
+                    ..Default::default()
                 };
                 set_camera(&camera);
 
-                draw_grid(40, 1.0, Color::new(0.15, 0.20, 0.28, 0.25));
+                draw_grid(
+                    40,
+                    1.0,
+                    Color::new(0.15, 0.20, 0.28, 0.25),
+                    Color::new(0.15, 0.20, 0.28, 0.25),
+                );
                 for block in &blocks {
                     let p = vec3(block.x as f32, block.y as f32, block.z as f32);
-                    draw_cube(p, vec3(1.0, 1.0, 1.0), block_color(block.kind));
+                    draw_cube(p, vec3(1.0, 1.0, 1.0), None, block_color(block.kind));
                     draw_cube_wires(p, vec3(1.002, 1.002, 1.002), Color::new(0.035, 0.045, 0.06, 0.7));
                 }
 
