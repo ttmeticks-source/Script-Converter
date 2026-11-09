@@ -208,11 +208,10 @@ fn add_smooth_ground_surface(chunk: &mut ChunkMeshData, seed: u64, style: u8) {
                 ((x + 1) as f32, h11, (z + 1) as f32),
                 ((x + 1) as f32, h10, z as f32),
             ];
-            let u0 = local_x as f32 * 0.25;
-            let v0 = local_z as f32 * 0.25;
-            let u1 = (local_x + 1) as f32 * 0.25;
-            let v1 = (local_z + 1) as f32 * 0.25;
-            let uvs = [(u0, v0), (u0, v1), (u1, v1), (u1, v0)];
+            // Macroquad's high-level texture wrapper clamps UVs at the edge.
+            // Give every one-metre terrain quad a complete 0..1 texture range
+            // instead of letting chunk-wide UVs clamp into long streaks.
+            let uvs = [(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)];
             append_world_quad(material_for(chunk, kind), corners, uvs, shade);
         }
     }
@@ -277,13 +276,43 @@ pub fn upload_chunk_data(
         .collect()
 }
 
-/// Draw only nearby chunks; each mesh contains many visible block faces.
+/// Replace one edited chunk without rebuilding every loaded chunk on the
+/// main thread. Neighbor occupancy is still read from the complete world set.
+pub fn rebuild_one_chunk(
+    chunks: &mut Vec<FastChunk>,
+    blocks: &[Block],
+    occupied: &HashSet<(i32, i32, i32)>,
+    seed: u64,
+    style: u8,
+    chunk_x: i32,
+    chunk_z: i32,
+    textures: &[Texture2D; 8],
+) {
+    let chunk_blocks: Vec<Block> = blocks
+        .iter()
+        .copied()
+        .filter(|block| {
+            block.x.div_euclid(CHUNK_SIZE) == chunk_x
+                && block.z.div_euclid(CHUNK_SIZE) == chunk_z
+        })
+        .collect();
+
+    chunks.retain(|chunk| chunk.chunk_x != chunk_x || chunk.chunk_z != chunk_z);
+    let data = build_chunk_data_smooth(&chunk_blocks, occupied, seed, style);
+    chunks.extend(upload_chunk_data(data, textures));
+}
+
+/// Draw only nearby chunks that are inside a loose horizontal camera frustum.
+/// The coarse test avoids spending draw calls on terrain behind the player.
 pub fn draw_visible_chunks(
     chunks: &[FastChunk],
     camera_position: Vec3,
+    camera_forward: Vec3,
     render_distance: f32,
 ) -> (usize, usize) {
     let limit_squared = render_distance * render_distance;
+    let forward = vec2(camera_forward.x, camera_forward.z).normalize_or_zero();
+    let chunk_radius = CHUNK_SIZE as f32 * 0.72;
     let mut visible_chunks = 0;
     let mut draw_calls = 0;
 
@@ -292,8 +321,17 @@ pub fn draw_visible_chunks(
         let center_z = chunk.chunk_z as f32 * CHUNK_SIZE as f32 + CHUNK_SIZE as f32 * 0.5;
         let dx = center_x - camera_position.x;
         let dz = center_z - camera_position.z;
-        if dx * dx + dz * dz > limit_squared {
+        let distance_squared = dx * dx + dz * dz;
+        if distance_squared > limit_squared {
             continue;
+        }
+
+        let distance = distance_squared.sqrt();
+        if forward.length_squared() > 0.5 && distance > chunk_radius {
+            let forward_distance = dx * forward.x + dz * forward.y;
+            if forward_distance < distance * 0.55 - chunk_radius {
+                continue;
+            }
         }
 
         visible_chunks += 1;
