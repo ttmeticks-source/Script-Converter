@@ -180,6 +180,7 @@ fn add_smooth_ground_surface(
 ) {
     let start_x = chunk.chunk_x * CHUNK_SIZE;
     let start_z = chunk.chunk_z * CHUNK_SIZE;
+    let chunk_scale = CHUNK_SIZE as f32;
 
     for local_x in 0..CHUNK_SIZE {
         for local_z in 0..CHUNK_SIZE {
@@ -191,11 +192,10 @@ fn add_smooth_ground_surface(
             let h10 = crate::terrain_height_smooth(seed, style, x + 1, z) + 0.035;
 
             let discrete_height = crate::terrain_height(seed, style, x, z);
-            // Removing the natural top block removes this surface quad too,
-            // allowing a dug column to expose the layer underneath.
             if !occupied.contains(&(x, discrete_height, z)) {
                 continue;
             }
+
             let temperature = crate::value_noise(
                 seed ^ 0x13a5ba1d4e7c902f,
                 x as f32 * 0.035,
@@ -209,20 +209,59 @@ fn add_smooth_ground_surface(
                 0
             };
 
-            let slope = ((h10 - h00).abs() + (h01 - h00).abs()
-                + (h11 - h10).abs() + (h11 - h01).abs()) * 0.035;
-            let shade = (0.97 - slope).clamp(0.72, 1.0);
+            // A directional sun term gives hillsides light and shadow instead
+            // of darkening every slope equally.
+            let dx = h10 - h00;
+            let dz = h01 - h00;
+            let normal = vec3(-dx, 1.0, -dz).normalize_or_zero();
+            let sun = vec3(-0.42, 0.82, 0.38).normalize();
+            let diffuse = normal.dot(sun).max(0.0);
+            let local_roughness = ((h11 - h10).abs() + (h11 - h01).abs()) * 0.018;
+            let shade = (0.68 + diffuse * 0.34 - local_roughness).clamp(0.58, 1.0);
+
             let corners = [
                 (x as f32, h00, z as f32),
                 (x as f32, h01, (z + 1) as f32),
                 ((x + 1) as f32, h11, (z + 1) as f32),
                 ((x + 1) as f32, h10, z as f32),
             ];
-            // Macroquad's high-level texture wrapper clamps UVs at the edge.
-            // Give every one-metre terrain quad a complete 0..1 texture range
-            // instead of letting chunk-wide UVs clamp into long streaks.
-            let uvs = [(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)];
+
+            // One 128px material tile covers a whole 16x16m chunk. This gives
+            // grass and sand natural variation without a repeated square stamp
+            // on every single terrain cell.
+            let u0 = local_x as f32 / chunk_scale;
+            let v0 = local_z as f32 / chunk_scale;
+            let u1 = (local_x + 1) as f32 / chunk_scale;
+            let v1 = (local_z + 1) as f32 / chunk_scale;
+            let uvs = [(u0, v0), (u0, v1), (u1, v1), (u1, v0)];
             append_world_quad(material_for(chunk, kind), corners, uvs, shade);
+        }
+    }
+
+    // Water is one continuous plane at sea level, not a stack of visible
+    // cube tops. This removes the striped, rectangular shoreline appearance.
+    let water_y = crate::SEA_LEVEL as f32 + 0.025;
+    for local_x in 0..CHUNK_SIZE {
+        for local_z in 0..CHUNK_SIZE {
+            let x = start_x + local_x;
+            let z = start_z + local_z;
+            let ground_height = crate::terrain_height(seed, style, x, z);
+            if ground_height >= crate::SEA_LEVEL || !occupied.contains(&(x, crate::SEA_LEVEL, z)) {
+                continue;
+            }
+
+            let corners = [
+                (x as f32, water_y, z as f32),
+                (x as f32, water_y, (z + 1) as f32),
+                ((x + 1) as f32, water_y, (z + 1) as f32),
+                ((x + 1) as f32, water_y, z as f32),
+            ];
+            let u0 = local_x as f32 / chunk_scale;
+            let v0 = local_z as f32 / chunk_scale;
+            let u1 = (local_x + 1) as f32 / chunk_scale;
+            let v1 = (local_z + 1) as f32 / chunk_scale;
+            let uvs = [(u0, v0), (u0, v1), (u1, v1), (u1, v0)];
+            append_world_quad(material_for(chunk, 6), corners, uvs, 0.96);
         }
     }
 }
@@ -251,7 +290,8 @@ pub fn build_chunk_data_smooth(
                 .into_iter()
                 .filter(|block| {
                     block.placed
-                        || block.kind >= 4
+                        || block.kind == 4
+                        || block.kind == 5
                         || (!occupied.contains(&(block.x, block.y + 1, block.z))
                             && block.y < crate::terrain_height(seed, style, block.x, block.z))
                 })
