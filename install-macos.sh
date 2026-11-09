@@ -99,7 +99,8 @@ NSGradient(colors: [
     NSColor(calibratedRed: 0.94, green: 0.48, blue: 0.25, alpha: 0.08)
 ])!.draw(in: glow, angle: 45)
 
-for (x, y, radius) in [(170.0, 820.0, 5.0), (315.0, 875.0, 3.0), (820.0, 870.0, 4.0), (880.0, 720.0, 3.0)] {
+let stars: [(CGFloat, CGFloat, CGFloat)] = [(170, 820, 5), (315, 875, 3), (820, 870, 4), (880, 720, 3)]
+for (x, y, radius) in stars {
     NSColor(calibratedWhite: 1.0, alpha: 0.72).setFill()
     NSBezierPath(ovalIn: NSRect(x: x, y: y, width: radius * 2, height: radius * 2)).fill()
 }
@@ -148,8 +149,8 @@ ICONSET="$APP_BUNDLE/Contents/Resources/RealismCraft.iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 128 256 512; do
   double_size=$((size * 2))
-  sips -z "$size" "$size" "$TMP_DIR/RealismCraft.png" --out "$ICONSET/icon_\${size}x\${size}.png" >/dev/null
-  sips -z "$double_size" "$double_size" "$TMP_DIR/RealismCraft.png" --out "$ICONSET/icon_\${size}x\${size}@2x.png" >/dev/null
+  sips -z "$size" "$size" "$TMP_DIR/RealismCraft.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -z "$double_size" "$double_size" "$TMP_DIR/RealismCraft.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP_BUNDLE/Contents/Resources/RealismCraft.icns"
 
