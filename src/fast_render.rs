@@ -172,7 +172,12 @@ fn material_for(chunk: &mut ChunkMeshData, kind: u8) -> &mut MaterialMeshData {
 /// Adds a continuous height-field surface for natural terrain. The underlying
 /// terrain blocks remain in the world data for edits and saves, but only
 /// constructed blocks, trees and water are rendered as block models.
-fn add_smooth_ground_surface(chunk: &mut ChunkMeshData, seed: u64, style: u8) {
+fn add_smooth_ground_surface(
+    chunk: &mut ChunkMeshData,
+    seed: u64,
+    style: u8,
+    occupied: &HashSet<(i32, i32, i32)>,
+) {
     let start_x = chunk.chunk_x * CHUNK_SIZE;
     let start_z = chunk.chunk_z * CHUNK_SIZE;
 
@@ -252,7 +257,7 @@ pub fn build_chunk_data_smooth(
                 })
                 .collect();
             let mut chunk = build_one_chunk(chunk_x, chunk_z, visible_blocks, occupied);
-            add_smooth_ground_surface(&mut chunk, seed, style);
+            add_smooth_ground_surface(&mut chunk, seed, style, occupied);
             chunk
         })
         .collect();
