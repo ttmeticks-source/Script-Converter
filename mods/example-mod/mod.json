@@ -1,0 +1,9 @@
+{
+  "id": "example-mod",
+  "name": "Example RealismCraft Mod",
+  "version": "0.1.0",
+  "entry": "build/example_mod.wasm",
+  "runtime": "wasm32-wasi",
+  "api_version": 1,
+  "permissions": []
+}
