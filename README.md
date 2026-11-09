@@ -59,6 +59,7 @@ cargo run --release
 - **- (minus key)** — open chat; use `/gamemode creative` or type `/help` for commands
 - **Enter** — send the chat command
 - **F3** — show/hide renderer counters
+- **F4** — cycle render distance (48m / 64m / 80m)
 - **Space / Left Ctrl** — move up / down
 - **Left Shift** — move faster
 - **Left click** — break the targeted block
