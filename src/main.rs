@@ -1705,46 +1705,55 @@ async fn main() {
                 let screen_w = screen_width();
                 let screen_h = screen_height();
 
+                let hud_width = (screen_w - 190.0).clamp(300.0, 550.0);
+                let hud_text_width = hud_width - 28.0;
                 draw_rectangle(
                     16.0,
                     16.0,
-                    550.0,
+                    hud_width,
                     104.0,
                     Color::new(0.012, 0.020, 0.052, 0.90),
                 );
                 draw_rectangle_lines(
                     16.0,
                     16.0,
-                    550.0,
+                    hud_width,
                     104.0,
                     1.0,
                     Color::new(0.24, 0.38, 0.72, 0.82),
                 );
-                label(
+                let player_world_title = fit_text(
                     &format!("{}  /  {}", player_name, world_name),
-                    30.0,
-                    43.0,
+                    hud_text_width,
                     17.0,
-                    WHITE,
+                );
+                label(&player_world_title, 30.0, 43.0, 17.0, WHITE);
+
+                let terrain_seed_title = fit_text(
+                    &format!("{} TERRAIN   |   SEED {}", terrain_style_name(world_style), world_seed),
+                    hud_text_width,
+                    13.0,
                 );
                 label(
-                    &format!(
-                        "{} TERRAIN   |   SEED {}",
-                        terrain_style_name(world_style),
-                        world_seed
-                    ),
+                    &terrain_seed_title,
                     30.0,
                     68.0,
                     13.0,
                     Color::new(0.77, 0.84, 1.0, 1.0),
                 );
-                label(
+
+                let world_controls_title = fit_text(
                     &format!(
                         "{} blocks  |  {}  |  LEFT break  |  RIGHT place  |  F4 {}m",
                         blocks.len(),
                         game_mode.label(),
                         render_distance as u32
                     ),
+                    hud_text_width,
+                    11.0,
+                );
+                label(
+                    &world_controls_title,
                     30.0,
                     96.0,
                     11.0,
@@ -1799,15 +1808,17 @@ async fn main() {
                     );
                 }
 
+                let message_width = (screen_w - 32.0).min(390.0);
                 draw_rectangle(
                     16.0,
                     screen_h - 96.0,
-                    390.0,
+                    message_width,
                     22.0,
-                    Color::new(0.015, 0.025, 0.06, 0.78),
+                    Color::new(0.015, 0.025, 0.06, 0.82),
                 );
+                let message_text = fit_text(&world_message, message_width - 16.0, 12.0);
                 label(
-                    &world_message,
+                    &message_text,
                     24.0,
                     screen_h - 80.0,
                     12.0,
