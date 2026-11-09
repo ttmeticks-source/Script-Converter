@@ -1,5 +1,7 @@
 # RealismCraft
 
+<p align="center"><img src="assets/realismcraft-banner.svg" alt="RealismCraft — Build your own universe" width="100%"></p>
+
 **A standalone voxel sandbox for macOS and Windows.**
 
 RealismCraft is an original block-building game project written in Rust. It is not Minecraft, does not bundle Mojang assets, and does not require a Minecraft account.
